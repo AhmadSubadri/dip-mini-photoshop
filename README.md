@@ -95,8 +95,8 @@
 
 ### 1. Kloning Repositori
 ```bash
-git clone https://github.com/username/mini-photoshop.git
-cd mini-photoshop/mini_photoshop_project
+git clone https://github.com/AhmadSubadri/dip-mini-photoshop.git
+cd dip-mini-photoshop
 ```
 
 ### 2. Pasang Dependensi
@@ -193,11 +193,16 @@ mini_photoshop_project/
 
 ---
 
-## 👨‍💻 Penulis & Pengembang
+## 👥 Tim Pengembang (Development Team)
 
-* **Ahmad Subadri**
-* **Program Studi**: Magister Informatika / Ilmu Komputer (S2)
-* **Mata Kuliah**: Pengolahan dan Analisis Citra Digital
+Proyek ini dikembangkan untuk memenuhi tugas besar mata kuliah **Pengolahan dan Analisis Citra Digital** — **Program Studi Magister Informatika / Ilmu Komputer (S2)**.
+
+| No | Nama Anggota | NIM | Peran / Kontribusi |
+| :---: | :--- | :---: | :--- |
+| 1 | *Nama Anggota 1* | *NIM* | UI/UX & Canvas Interaction |
+| 2 | *Nama Anggota 2* | *NIM* | Native File Parser (Netpbm & BMP) |
+| 3 | *Nama Anggota 3* | *NIM* | Image Processing Engine & Point Ops |
+| 4 | *Nama Anggota 4* | *NIM* | Arithmetic & Geometric Ops |
 
 ---
 
