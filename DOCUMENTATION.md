@@ -1,22 +1,23 @@
 # 📖 Dokumentasi Teknis & Panduan Pengembangan Mini Photoshop
 
-Dokumen ini ditujukan sebagai panduan komprehensif bagi anggota tim pengembang untuk memahami arsitektur, struktur kode, alur data citra (*pipeline*), detail setiap fungsi, serta panduan langkah demi langkah dalam menambahkan fitur baru.
+Dokumen ini ditujukan sebagai panduan komprehensif bagi anggota tim pengembang untuk memahami arsitektur, struktur kode, alur data citra (*pipeline*), detail setiap fungsi, kamus konstanta/angka teknis, serta panduan langkah demi langkah dalam menambahkan fitur baru.
 
 ---
 
 ## 📑 Daftar Isi
 1. [Arsitektur Sistem & Aliran Data](#-arsitektur-sistem--aliran-data)
-2. [Dokumentasi Lengkap Berkas & Fungsi](#-dokumentasi-lengkap-berkas--fungsi)
+2. [📐 Kamus Parameter, Angka Konstanta & Ketentuan Teknis](#-kamus-parameter-angka-konstanta--ketentuan-teknis)
+3. [Dokumentasi Lengkap Berkas & Fungsi](#-dokumentasi-lengkap-berkas--fungsi)
    - [A. Entry Point](#a-entry-point)
    - [B. Engine Layer (Logika Citra Murni)](#b-engine-layer-logika-citra-murni)
    - [C. UI Layer (Antarmuka & Interaksi)](#c-ui-layer-antarmuka--interaksi)
    - [D. Test Suite](#d-test-suite)
-3. [Panduan Menambahkan Fitur Baru (How-To Develop)](#-panduan-menambahkan-fitur-baru-how-to-develop)
+4. [Panduan Menambahkan Fitur Baru (How-To Develop)](#-panduan-menambahkan-fitur-baru-how-to-develop)
    - [1. Menambahkan Operasi/Filter Citra Baru ke Engine](#1-menambahkan-operasifilter-citra-baru-ke-engine)
    - [2. Menghubungkan Operasi ke Menu Bar & UI](#2-menghubungkan-operasi-ke-menu-bar--ui)
    - [3. Membuat Dialog Interaktif dengan Live Preview](#3-membuat-dialog-interaktif-dengan-live-preview)
    - [4. Menambahkan Unit Test](#4-menambahkan-unit-test)
-4. [Konvensi & Standar Kode Tim](#-konvensi--standar-kode-tim)
+5. [Konvensi & Standar Kode Tim](#-konvensi--standar-kode-tim)
 
 ---
 
@@ -50,6 +51,105 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 │  - metrics.py       : Histogram, Mean, Variance, Sharpness, Noise               │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 📐 Kamus Parameter, Angka Konstanta & Ketentuan Teknis
+
+Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi representasi bit, dan formula matematis** yang tertanam di dalam kode program agar pengembang tidak perlu mencari-cari manual ke dalam source code:
+
+### 1. Format Citra & Konvensi Representasi Bit (Materi P5 - `io_custom.py`)
+* **Netpbm PBM (Portable BitMap - 1 Bit Monokrom)**:
+  * **Definisi Standar Netpbm**: Nilai `1` = Hitam (*Black/Foregorund*), Nilai `0` = Putih (*White/Background*).
+  * **Konversi Display 8-bit Matriks Aplikasi**:
+    * Nilai Netpbm `1` $\rightarrow$ Nilai Piksel `0` (Hitam pekat).
+    * Nilai Netpbm `0` $\rightarrow$ Nilai Piksel `255` (Putih terang).
+  * **Binary P4 Bit-Packing**: Setiap 1 byte memuat 8 piksel (MSB ke LSB: `Bit 7` = piksel ke-0, `Bit 0` = piksel ke-7). Jika lebar baris citra bukan kelipatan 8, sisa bit di akhir baris diberi padding hingga batas byte berikutnya.
+* **Netpbm PGM (Portable GrayMap - 8 Bit Grayscale)**:
+  * Format: `P2` (Teks ASCII) dan `P5` (Biner 1 byte per piksel).
+  * Nilai `MaxVal`: Standar `255` (intensitas dari $0$ hitam s.d. $255$ putih).
+* **Netpbm PPM (Portable PixMap - 24 Bit RGB)**:
+  * Format: `P3` (Teks ASCII) dan `P6` (Biner 3 byte per piksel dengan urutan kanal $R, G, B$).
+* **Windows BMP (Bitmap DIB 24-bit & 8-bit)**:
+  * **BMP File Header**: Ukuran tepat `14 byte` (Magic bytes: `BM` / `0x4D42`).
+  * **DIB Info Header (BITMAPINFOHEADER)**: Ukuran tepat `40 byte`.
+  * **Aturan Row-Padding 4-Byte Alignment**: Ukuran setiap baris piksel pada file BMP wajib merupakan kelipatan 4 byte. Dihitung dengan rumus:
+    $$\text{RowStride} = \left\lfloor \frac{\text{Width} \times \text{bpp} + 31}{32} \right\rfloor \times 4$$
+    *Contoh*: Citra lebar 10 piksel (24-bit = 3 byte/px) $\rightarrow 10 \times 3 = 30\text{ byte}$. Maka ditambahkan **2 byte padding dummy** agar menjadi $32\text{ byte}$ (kelipatan 4).
+  * **Urutan Kanal & Susunan Baris**: Disimpan dengan urutan kanal $B-G-R$ (Blue-Green-Red) dan urutan baris dari bawah ke atas (*bottom-up scanline*).
+* **RAW Binary Image**:
+  * Tidak memiliki header metadata. Memerlukan masukan parameter dimensi manual: Lebar ($W$), Tinggi ($H$), Channels ($1$ = Gray, $3$ = RGB), Bit Depth ($8$-bit), dan Header Offset ($N$ byte yang dilewati).
+
+---
+
+### 2. Parameter Kanvas & Fitur Zooming (`canvas.py` & `main_window.py`)
+* **Rentang Skala Zoom (Zoom Bounds)**:
+  * **Minimum Zoom**: `5%` ($0.05\times$)
+  * **Maksimum Zoom**: `3200%` ($32.0\times$)
+* **Faktor Perubahan Skala (Step Multiplier)**:
+  * **Via Shortcut Keyboard (`Ctrl + +` / `Ctrl + -`) & Menu Toolbar**:
+    * Zoom In: Dikalikan **`1.25`** ($+25\%$) per klik.
+    * Zoom Out: Dibagi **`1.25`** ($-25\%$) per klik.
+  * **Via Roda Mouse (*Mouse Wheel Scroll*)**:
+    * Zoom In: Dikalikan **`1.15`** ($+15\%$) per tick rotasi roda.
+    * Zoom Out: Dibagi **`1.15`** ($-15\%$) per tick rotasi roda.
+    * *Zoom-Around-Cursor Math*: Menggeser titik *pan offset* secara proporsional sehingga titik piksel tepat di bawah kursor tidak bergeser saat diperbesar/diperkecil:
+      $$\text{PanOffset}' = \text{CursorPos} - (\text{CursorPos} - \text{PanOffset}) \times \frac{\text{NewZoom}}{\text{OldZoom}}$$
+* **Preset Cepat**:
+  * **Actual Size (`Ctrl + 1`)**: Skala tepat `1.0` ($100\%$ atau 1:1 piksel asli).
+  * **Fit on Screen (`Ctrl + 0`)**: Menyesuaikan skala otomatis dengan batas kanvas: $\min\left(\frac{W_{\text{view}}-40}{W_{\text{img}}}, \frac{H_{\text{view}}-40}{H_{\text{img}}}, 4.0\right)$ dengan margin 20px padding.
+* **Fitur Split-Screen Comparison (Tirai Pembanding Sebelum/Sesudah)**:
+  * **Rasio Pembagi Awal**: `0.5` (50% tepat di tengah citra).
+  * **Rentang Rasio**: `0.0` s.d. `1.0`.
+  * **Toleransi Deteksi Klik Mouse**: `±8 piksel` dari posisi garis pemisah vertikal untuk mengubah kursor menjadi ikon resize horizontal (`SplitHCursor`).
+
+---
+
+### 3. Parameter Operasi Aras Titik (Materi P6 - `point_ops.py`)
+* **Bobot Konversi Grayscale Luminansi NTSC (ITU-R BT.601)**:
+  * Kanal Merah ($R$): **`0.299`**
+  * Kanal Hijau ($G$): **`0.587`** (mata manusia paling sensitif terhadap spektrum hijau)
+  * Kanal Biru ($B$): **`0.114`**
+  * $\text{Total Bobot} = 0.299 + 0.587 + 0.114 = 1.000$.
+* **Kecerahan (Brightness)**:
+  * Rentang Parameter: $[-255, +255]$ (Nilai awal: `0`).
+  * Rumus: $\text{clip}(f(x, y) + b, 0, 255)$.
+* **Kontras (Contrast)**:
+  * Rentang Parameter: $[0.1, 5.0]$ (Nilai awal: `1.0` netral).
+  * Titik Jangkar Pivot (*Center Gray*): `128`.
+  * Rumus: $\text{clip}(128 + c \cdot (f(x, y) - 128), 0, 255)$.
+* **Ambang Batas Manual (Manual Thresholding)**:
+  * Rentang Parameter: $[0, 255]$ (Nilai awal: `128`).
+  * Aturan: $f(x, y) \ge T \implies 255$, $f(x, y) < T \implies 0$.
+* **Koreksi Gamma (Power-Law Transformation)**:
+  * Rentang Parameter: $[0.1, 5.0]$ (Nilai awal: `1.0` linier).
+  * Rumus: $s = 255 \times \left(\frac{r}{255}\right)^\gamma$.
+  * *Efek visual*: $\gamma < 1.0$ mencerahkan area bayangan gelap (*shadows*); $\gamma > 1.0$ mempertegas area kontras terang (*highlights*).
+* **Posterisasi (Bit Quantization)**:
+  * Rentang Pilihan Bit: $1, 2, 3, 4, 5, 6, 7, 8$ bit/channel.
+  * Operasi Bit-Shift: `(arr >> (8 - bits)) << (8 - bits)`.
+* **Solarisasi (Solarize Effect)**:
+  * Rentang Ambang: $[0, 255]$ (Nilai awal: `128`).
+  * Aturan: $f(x,y) > T \implies 255 - f(x,y)$, selain itu tetap $f(x,y)$.
+
+---
+
+### 4. Parameter Operasi Aritmetika & Aljabar (`arithmetic_ops.py`)
+* **Alpha Blending Transparansi**:
+  * Rentang Parameter $\alpha$: $[0.0, 1.0]$ (Nilai awal: `0.5`).
+  * Rumus: $C(x, y) = \alpha \cdot A(x, y) + (1.0 - \alpha) \cdot B(x, y)$.
+* **Normalisasi Perkalian Citra**:
+  * Rumus: $C(x, y) = \frac{A(x, y) \times B(x, y)}{255}$ (mencegah overflow integer dan menjaga rentang $[0, 255]$).
+
+---
+
+### 5. Parameter Metrik & Estimasi Kualitas Citra (`metrics.py`)
+* **Kernel Konvolusi Laplacian (Estimasi Ketajaman / Sharpness)**:
+  $$K_{\text{Laplacian}} = \begin{bmatrix} 0 & 1 & 0 \\ 1 & -4 & 1 \\ 0 & 1 & 0 \end{bmatrix}$$
+  *Metrik*: Dihitung dari nilai varians spasial $\text{Var}(\nabla^2 f)$. Semakin tinggi nilainya, semakin tajam dan fokus gambar tersebut.
+* **Kernel Konvolusi Immerkaer (Estimasi Derau / Noise Level)**:
+  $$K_{\text{Immerkaer}} = \begin{bmatrix} 1 & -2 & 1 \\ -2 & 4 & -2 \\ 1 & -2 & 1 \end{bmatrix}$$
+  *Konstanta Skalar*: $\sqrt{\frac{\pi}{2}} \frac{1}{6(W-2)(H-2)} \approx 1.2533 \times \dots$
 
 ---
 
@@ -200,7 +300,7 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 #### 📄 `mini_photoshop/ui/histogram_widget.py`
 * **Tujuan**: Widget custom pembina kurva grafik histogram.
 * **Fitur Utama**:
-  * Merender grafik distribusi warna RGB dan Grayscale dengan kurva kurva semi-transparan ber-antialiasing halus.
+  * Merender grafik distribusi warna RGB dan Grayscale dengan kurva semi-transparan ber-antialiasing halus.
   * Interaksi hover mouse: menampilkan garis vertikal penunjuk intensitas ($0-255$) beserta jumlah piksel pada posisi tersebut via tooltip.
 
 ---
