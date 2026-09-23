@@ -193,19 +193,6 @@ mini_photoshop_project/
 
 ---
 
-## 👥 Tim Pengembang (Development Team)
-
-Proyek ini dikembangkan untuk memenuhi tugas besar mata kuliah **Pengolahan dan Analisis Citra Digital** — **Program Studi Magister Informatika / Ilmu Komputer (S2)**.
-
-| No | Nama Anggota | NIM | Peran / Kontribusi |
-| :---: | :--- | :---: | :--- |
-| 1 | *Nama Anggota 1* | *NIM* | UI/UX & Canvas Interaction |
-| 2 | *Nama Anggota 2* | *NIM* | Native File Parser (Netpbm & BMP) |
-| 3 | *Nama Anggota 3* | *NIM* | Image Processing Engine & Point Ops |
-| 4 | *Nama Anggota 4* | *NIM* | Arithmetic & Geometric Ops |
-
----
-
 ## 📄 Lisensi
 
 Proyek ini dilisensikan di bawah [Lisensi MIT](LICENSE) - bebas digunakan, dimodifikasi, dan didistribusikan untuk kepentingan akademik maupun pengembangan perangkat lunak.
