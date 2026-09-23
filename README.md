@@ -15,7 +15,8 @@
 [Instalasi](#-instalasi--menjalankan) •
 [Matematika & Algoritma](#-pemetaan-algoritma--matematika-citra) •
 [Struktur Kode](#-arsitektur--struktur-proyek) •
-[Pintasan Keyboard](#-pintasan-keyboard-shortcuts)
+[Pintasan Keyboard](#-pintasan-keyboard-shortcuts) •
+[Panduan Developer (Docs)](DOCUMENTATION.md)
 
 </div>
 
