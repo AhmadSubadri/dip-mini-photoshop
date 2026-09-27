@@ -51,6 +51,25 @@ def compute_normalized_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
     return {key: arr.astype(np.float64) / n for key, arr in raw.items()}
 
 
+def compute_cumulative_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
+    """
+    Computes cumulative histograms (CDF): P(i <= j) = sum of h(i) for i = 0..j
+
+    where h(i) is the normalized histogram (probability of intensity i).
+
+    Each bin j contains the probability that a pixel has intensity <= j.
+    Properties:
+      - Same 256-bin domain and channel keys as compute_normalized_histograms()
+      - Values are in [0.0, 1.0]
+      - Monotonically non-decreasing
+      - Final bin (j=255) is approximately 1.0 for any valid image
+
+    Supports binary, grayscale, and RGB images.
+    """
+    normalized = compute_normalized_histograms(img)
+    return {key: np.cumsum(arr) for key, arr in normalized.items()}
+
+
 def compute_statistics(img: ImageMatrix) -> Dict[str, Any]:
     """
     Computes basic statistical properties of the image matrix.

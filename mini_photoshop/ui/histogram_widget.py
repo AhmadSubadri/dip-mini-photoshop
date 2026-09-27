@@ -1,7 +1,8 @@
 """
 High-performance Interactive Histogram Widget for Mini Photoshop.
 Renders RGB and Grayscale distributions with antialiased curves, tooltips, and channel filtering.
-Supports both Normal (raw counts) and Normalized (probability h(i) = n(i)/N) display modes.
+Supports Normal (raw counts), Normalized (probability h(i) = n(i)/N), and
+Cumulative (CDF: P(i<=j) = Σ h(i)) display modes.
 """
 
 from typing import Optional, Dict
@@ -10,7 +11,10 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPainterPath, QFont
 from PyQt6.QtCore import Qt
 from ..engine.core import ImageMatrix
-from ..engine.metrics import compute_histograms, compute_normalized_histograms, compute_statistics
+from ..engine.metrics import (
+    compute_histograms, compute_normalized_histograms,
+    compute_cumulative_histograms, compute_statistics
+)
 
 
 class HistogramCanvas(QWidget):
@@ -23,27 +27,30 @@ class HistogramCanvas(QWidget):
         self.setMouseTracking(True)
         self.histograms: Dict[str, np.ndarray] = {}                # raw counts (int)
         self.histograms_normalized: Dict[str, np.ndarray] = {}     # h(i) = n(i)/N (float)
-        self.normalized: bool = False                               # display mode flag
+        self.histograms_cumulative: Dict[str, np.ndarray] = {}     # CDF: P(i<=j) (float)
+        self.display_mode: str = "normal"  # "normal" | "normalized" | "cumulative"
         self.selected_channel: str = "RGB"  # "RGB", "Red", "Green", "Blue", "Gray"
         self.hover_bin: Optional[int] = None
-        self.hover_count: int = 0
+        self.hover_count: float = 0.0
 
     def set_data(self, img: Optional[ImageMatrix]):
         if img is None:
             self.histograms = {}
             self.histograms_normalized = {}
+            self.histograms_cumulative = {}
         else:
             self.histograms = compute_histograms(img)
             self.histograms_normalized = compute_normalized_histograms(img)
+            self.histograms_cumulative = compute_cumulative_histograms(img)
         self.update()
 
     def set_channel(self, channel: str):
         self.selected_channel = channel
         self.update()
 
-    def set_normalized(self, enabled: bool):
-        """Switch between raw count display (Normal) and probability display (Normalized)."""
-        self.normalized = enabled
+    def set_display_mode(self, mode: str):
+        """Set display mode: 'normal' | 'normalized' | 'cumulative'."""
+        self.display_mode = mode
         self.update()
 
     def mouseMoveEvent(self, event):
@@ -54,9 +61,14 @@ class HistogramCanvas(QWidget):
         if 0 <= x <= w and w > 0:
             bin_idx = int(round((x / w) * 255.0))
             self.hover_bin = max(0, min(255, bin_idx))
-            self.hover_count = 0
+            self.hover_count = 0.0
             # Read from whichever histogram dict is currently active
-            active_hists = self.histograms_normalized if self.normalized else self.histograms
+            if self.display_mode == "cumulative":
+                active_hists = self.histograms_cumulative
+            elif self.display_mode == "normalized":
+                active_hists = self.histograms_normalized
+            else:
+                active_hists = self.histograms
             for ch, h in active_hists.items():
                 if self.hover_bin < len(h):
                     self.hover_count = max(self.hover_count, float(h[self.hover_bin]))
@@ -102,16 +114,25 @@ class HistogramCanvas(QWidget):
         painter.setPen(QPen(QColor("#3c3c3c"), 1))
         painter.drawRect(margin_l, margin_t, plot_w, plot_h)
 
-        # Select the active histogram dict based on the current mode
-        active_hists = self.histograms_normalized if self.normalized else self.histograms
+        # Select the active histogram dict based on the current display mode
+        if self.display_mode == "cumulative":
+            active_hists = self.histograms_cumulative
+        elif self.display_mode == "normalized":
+            active_hists = self.histograms_normalized
+        else:
+            active_hists = self.histograms
 
-        # Determine maximum bin value for Y-axis scaling
-        max_val = 1.0 if self.normalized else 1
-        for name, h in active_hists.items():
-            if name != 'Luminance' or 'Gray' in active_hists:
-                max_val = max(max_val, float(np.max(h)))
+        # Determine maximum bin value for Y-axis scaling.
+        # Cumulative and normalized modes are bounded by 1.0; raw mode scales to its peak.
+        if self.display_mode in ("normalized", "cumulative"):
+            max_val = 1.0
+        else:
+            max_val = 1
+            for name, h in active_hists.items():
+                if name != 'Luminance' or 'Gray' in active_hists:
+                    max_val = max(max_val, float(np.max(h)))
 
-        # Channels to draw (channel selection logic based on raw histogram keys)
+        # Channels to draw (channel selection logic always uses raw histogram keys)
         channels_to_draw = []
         if self.selected_channel == "RGB":
             if "R" in self.histograms:
@@ -177,8 +198,10 @@ class HistogramCanvas(QWidget):
             painter.setPen(QPen(QColor("#ffffff"), 1, Qt.PenStyle.DotLine))
             painter.drawLine(int(x_hover), margin_t, int(x_hover), margin_t + plot_h)
 
-            # Tooltip: show count or probability depending on mode
-            if self.normalized:
+            # Tooltip: format depends on active mode
+            if self.display_mode == "cumulative":
+                tip_text = f"Int: {self.hover_bin} | P(i\u2264j): {self.hover_count:.4f}"
+            elif self.display_mode == "normalized":
                 tip_text = f"Int: {self.hover_bin} | h(i): {self.hover_count:.4f}"
             else:
                 tip_text = f"Int: {self.hover_bin} | Count: {int(self.hover_count):,}"
@@ -188,7 +211,7 @@ class HistogramCanvas(QWidget):
 
 class HistogramWidget(QWidget):
     """
-    Full Histogram Panel with channel combo selector, Normal/Normalized mode toggle,
+    Full Histogram Panel with channel combo selector, Normal/Normalized/Cumulative mode toggle,
     live histogram canvas, and statistical summary (Mean, Variance, Std Dev).
     """
     def __init__(self, parent=None):
@@ -203,10 +226,11 @@ class HistogramWidget(QWidget):
         lbl.setStyleSheet("font-weight: bold; color: #ffffff;")
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Normal", "Normalized"])
+        self.mode_combo.addItems(["Normal", "Normalized", "Cumulative"])
         self.mode_combo.setToolTip(
             "Normal: raw pixel counts\n"
-            "Normalized: h(i) = n(i) / N  (probability, range [0, 1])"
+            "Normalized: h(i) = n(i) / N  (probability, range [0, 1])\n"
+            "Cumulative: P(i\u2264j) = \u03a3 h(i)  (CDF, range [0, 1])"
         )
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
 
@@ -264,7 +288,12 @@ class HistogramWidget(QWidget):
     # ── Slots ──────────────────────────────────────────────────────────────
 
     def _on_mode_changed(self, text: str):
-        self.canvas.set_normalized(text == "Normalized")
+        if text == "Cumulative":
+            self.canvas.set_display_mode("cumulative")
+        elif text == "Normalized":
+            self.canvas.set_display_mode("normalized")
+        else:
+            self.canvas.set_display_mode("normal")
 
     def _on_channel_changed(self, text: str):
         if "Red" in text:
