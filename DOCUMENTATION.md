@@ -35,7 +35,8 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 │ UI LAYER (PyQt6)                                                                │
 │  - MainWindow       : Mengelola Menu, Toolbar, Shortcut, dan Tab Dokumen        │
 │  - CanvasWidget     : Merender QImage, Panning, Zooming, Split View             │
-│  - HistogramWidget  : Visualisasi Kurva Frekuensi RGB/Grayscale                 │
+│  - HistogramWidget  : Visualisasi Kurva Distribusi (Normal, Normalized, CDF)   │
+│                       beserta Ringkasan Statistik Real-Time (μ, σ², σ)          │
 │  - Dialogs          : Mengambil input pengguna & mengirim sinyal live preview   │
 └────────────────────────────────────────┬────────────────────────────────────────┘
                                          │ Mengirim / Mengambil ImageMatrix
@@ -48,7 +49,7 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 │  - arithmetic_ops.py: Add, Subtract, Multiply, Divide, Alpha Blend              │
 │  - boolean_ops.py   : AND, OR, NOT, XOR, Masking                                │
 │  - geometry_ops.py  : Translate, Rotate, Flip, Scale, Crop                      │
-│  - metrics.py       : Histogram, Mean, Variance, Sharpness, Noise               │
+│  - metrics.py       : Histogram (Raw, Normalized, CDF), Mean, Var, Sharp, Noise │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -150,6 +151,44 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 * **Kernel Konvolusi Immerkaer (Estimasi Derau / Noise Level)**:
   $$K_{\text{Immerkaer}} = \begin{bmatrix} 1 & -2 & 1 \\ -2 & 4 & -2 \\ 1 & -2 & 1 \end{bmatrix}$$
   *Konstanta Skalar*: $\sqrt{\frac{\pi}{2}} \frac{1}{6(W-2)(H-2)} \approx 1.2533 \times \dots$
+
+---
+
+### 6. Parameter & Formula Histogram Citra (Materi Histogram Citra - `metrics.py` & `histogram_widget.py`)
+* **Domain Intensitas Standar (256-Bin)**:
+  * Rentang tingkat keabuan atau kanal warna adalah $i \in [0, 255]$ ($K = 256$ tingkat intensitas).
+* **Histogram Normal / Raw Counts ($n(i)$)**:
+  * Menghitung total frekuensi kemunculan piksel yang memiliki nilai intensitas $i$:
+    $$n(i) = \sum_{x=0}^{W-1} \sum_{y=0}^{H-1} \delta(f(x, y), i)$$
+    di mana $\delta(a, b) = 1$ jika $a = b$, dan $0$ untuk kondisi lainnya.
+  * Tipe data: Array integer NumPy `int64` sepanjang 256 elemen.
+  * Sifat jumlahan total: $\sum_{i=0}^{255} n(i) = N$ (total seluruh piksel citra $W \times H$).
+* **Histogram Ternormalisasi / Peluang Probabilitas ($h(i)$)**:
+  * Menyatakan fungsi probabilitas kemunculan intensitas $i$ pada citra:
+    $$h(i) = \frac{n(i)}{N}$$
+    di mana $N = \text{Width} \times \text{Height}$.
+  * Karakteristik & Sifat:
+    * Tipe data: Array floating-point NumPy `np.float64` sepanjang 256 elemen.
+    * Batas nilai setiap bin: $0.0 \le h(i) \le 1.0$.
+    * Memenuhi aksioma probabilitas: $\sum_{i=0}^{255} h(i) = 1.0$.
+* **Histogram Kumulatif / Cumulative Distribution Function ($P(i \le j)$)**:
+  * Menyatakan probabilitas kumulatif bahwa suatu piksel memiliki intensitas lebih kecil atau sama dengan tingkat keabuan $j$:
+    $$P(i \le j) = \sum_{i=0}^j h(i), \quad \text{untuk } j = 0, 1, \dots, 255$$
+  * Karakteristik & Sifat:
+    * Dihitung melalui jumlahan kumulatif (*prefix sum*) `np.cumsum` dari array histogram ternormalisasi $h(i)$.
+    * Rentang nilai: $0.0 \le P(i \le j) \le 1.0$.
+    * Bersifat monoton tidak menurun (*monotonically non-decreasing*): $P(i \le j_1) \le P(i \le j_2)$ untuk $j_1 \le j_2$.
+    * Bin terakhir $j = 255$ bernilai tepat atau mendekati $1.0$ ($P(i \le 255) \approx 1.0$).
+* **Kalkulasi Parameter Statistik Citra**:
+  * **Rata-rata Intensitas Citra / Mean ($\mu$)**:
+    $$\mu = \frac{1}{N} \sum_{x=0}^{W-1} \sum_{y=0}^{H-1} f(x, y) = \sum_{i=0}^{255} i \cdot h(i)$$
+    Mengukur tingkat kecerahan (*brightness*) rata-rata citra secara global.
+  * **Varians Citra ($\sigma^2$)**:
+    $$\sigma^2 = \frac{1}{N} \sum_{x=0}^{W-1} \sum_{y=0}^{H-1} (f(x, y) - \mu)^2 = \sum_{i=0}^{255} (i - \mu)^2 \cdot h(i)$$
+    Mengukur dispersi atau sebaran intensitas piksel di sekitar nilai rata-rata $\mu$.
+  * **Standar Deviasi Citra ($\sigma$)**:
+    $$\sigma = \sqrt{\sigma^2}$$
+    Mencerminkan kontras global citra. Nilai $\sigma$ yang tinggi menandakan citra berkontras tinggi (dinamika intensitas lebar), sedangkan $\sigma$ rendah menandakan citra berkontras rendah (cenderung homogen / pudar).
 
 ---
 
@@ -265,12 +304,29 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 ---
 
 #### 📄 `mini_photoshop/engine/metrics.py`
-* **Tujuan**: Kalkulasi analisis data statistik, histogram, dan metrik kualitas citra (Materi P1–P3).
+* **Tujuan**: Kalkulasi analisis sebaran data statistik, histogram (Normal, Ternormalisasi, Kumulatif), dan metrik kualitas citra (Materi P1–P3 & Materi Histogram Citra).
 * **Fungsi**:
-  * `compute_histograms(img)`: Menghitung array sebaran 256 tingkat intensitas untuk channel R, G, B, dan Grayscale.
-  * `compute_statistics(img)`: Menghitung nilai piksel minimum, maksimum, rata-rata (mean), standar deviasi, dan entropi informasi citra.
-  * `estimate_sharpness(img)`: Mengestimasi tingkat ketajaman gambar berdasarkan varians operator Laplacian ($\nabla^2$).
-  * `estimate_noise(img)`: Mengestimasi tingkat noise citra menggunakan algoritma cepat berbasis Immerkaer.
+  * `compute_histograms(img)`:
+    * Menghitung histogram normal (*raw pixel counts*) dengan 256 bin ($[0, 255]$).
+    * Mengembalikan dictionary dengan kunci `'Gray'` untuk citra Grayscale/Biner, atau `'R'`, `'G'`, `'B'`, dan `'Luminance'` untuk citra RGB.
+  * `compute_normalized_histograms(img)`:
+    * Menghitung histogram ternormalisasi $h(i) = n(i) / N$ (peluang kemunculan intensitas).
+    * Membagi array raw histogram dengan total piksel citra $N = \text{Width} \times \text{Height}$.
+    * Menghasilkan nilai bertipe `np.float64` dalam rentang $[0.0, 1.0]$ dengan jumlahan $\sum_{i=0}^{255} h(i) = 1.0$.
+  * `compute_cumulative_histograms(img)`:
+    * Menghitung histogram kumulatif / CDF: $P(i \le j) = \sum_{i=0}^j h(i)$.
+    * Menggunakan `np.cumsum` pada histogram ternormalisasi.
+    * Menghasilkan nilai bertipe `np.float64` dalam rentang $[0.0, 1.0]$, bersifat monoton tidak menurun, dan bin terakhir $j = 255$ bernilai $\approx 1.0$.
+  * `compute_statistics(img)`:
+    * Menghitung ringkasan statistik deskriptif citra pada representasi grayscale:
+      * `mean_intensity` ($\mu$): Rata-rata tingkat intensitas citra.
+      * `variance` ($\sigma^2$): Varians sebaran intensitas piksel.
+      * `std_dev` ($\sigma$): Standar deviasi (indikator kontras global).
+      * `min_intensity` & `max_intensity`: Nilai piksel terendah dan tertinggi.
+      * `median_intensity` & `dynamic_range`: Nilai tengah dan rentang dinamis ($I_{\max} - I_{\min}$).
+      * `sharpness_laplacian`: Estimasi ketajaman berbasis varians konvolusi Laplacian $\nabla^2$.
+      * `noise_estimate`: Estimasi level derau menggunakan kernel konvolusi Immerkaer.
+      * Metadata pendukung: `total_pixels`, `dimensions`, `channels`, `color_mode`, `bit_depth`, `memory_size_kb`.
 
 ---
 
@@ -298,10 +354,28 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 ---
 
 #### 📄 `mini_photoshop/ui/histogram_widget.py`
-* **Tujuan**: Widget custom pembina kurva grafik histogram.
-* **Fitur Utama**:
-  * Merender grafik distribusi warna RGB dan Grayscale dengan kurva semi-transparan ber-antialiasing halus.
-  * Interaksi hover mouse: menampilkan garis vertikal penunjuk intensitas ($0-255$) beserta jumlah piksel pada posisi tersebut via tooltip.
+* **Tujuan**: Komponen widget visualisasi interaktif untuk kurva histogram dan ringkasan statistik citra real-time.
+* **Komponen & Fitur**:
+  * **`class HistogramCanvas(QWidget)`**:
+    * Kanvas gambar berbasis `QPainter` dengan antialiasing halus.
+    * Menyimpan tiga cache data: `histograms` (raw), `histograms_normalized`, dan `histograms_cumulative`.
+    * Mengatur mode visualisasi melalui `set_display_mode(mode)`:
+      * `"normal"`: Menampilkan frekuensi piksel mentah dengan penskalaan sumbu Y adaptif terhadap nilai puncak bin.
+      * `"normalized"`: Menampilkan fungsi probabilitas $h(i)$ dengan batas atas sumbu Y diatur ke $1.0$.
+      * `"cumulative"`: Menampilkan fungsi distribusi kumulatif $P(i \le j)$ dengan kurva monoton naik dan batas sumbu Y $1.0$.
+    * Mendukung filter kanal warna: `"RGB"` (kurva tumpuk R, G, B semi-transparan), `"Red"`, `"Green"`, `"Blue"`, dan `"Luminance / Gray"`.
+    * Interaksi kursor mouse (*hover marker*):
+      * Menggambar garis vertikal putih putus-putus pada bin intensitas yang ditunjuk.
+      * Menampilkan HUD tooltip kontekstual di pojok kiri atas:
+        * Mode Normal: `Int: <bin> | Count: <jumlah piksel>`
+        * Mode Normalized: `Int: <bin> | h(i): <probabilitas>`
+        * Mode Cumulative: `Int: <bin> | P(i≤j): <probabilitas kumulatif>`
+  * **`class HistogramWidget(QWidget)`**:
+    * Kontainer panel lengkap yang mengintegrasikan kanvas dan kontrol:
+      * Header bar: Combo box mode tampilan (`Normal`, `Normalized`, `Cumulative`) dan combo box seleksi kanal (`RGB`, `Red`, `Green`, `Blue`, `Luminance / Gray`).
+      * Garis pemisah horizontal (*separator*).
+      * Baris statistik real-time di bawah kanvas: `Mean (μ): <val>`, `Variance (σ²): <val>`, dan `Std Dev (σ): <val>`.
+    * `update_image(img)`: Memperbarui data kanvas dan menyegarkan label statistik secara otomatis saat dokumen aktif berganti atau disunting.
 
 ---
 
@@ -323,14 +397,18 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 
 #### 📄 `tests/test_engine.py`
 * **Tujuan**: Kumpulan pengujian otomatis (*Unit Testing*) berbasis `unittest` / `pytest` untuk memverifikasi keakuratan algoritma engine tanpa perlu membuka GUI.
-* **Daftar Tes**:
+* **Daftar Tes (11 Kasus Uji)**:
   * `test_01_core_and_undo_redo`: Validasi objek `ImageMatrix` dan stack Undo/Redo.
-  * `test_02_native_io_pbm_pgm_ppm_bmp_raw`: Validasi siklus simpan-dan-baca native parser.
-  * `test_03_point_operations`: Validasi matematis rumus invert, grayscale, brightness, contrast, dan Otsu.
-  * `test_04_arithmetic_and_blending`: Validasi penjumlahan, pengurangan, dan alpha blending citra.
-  * `test_05_boolean_and_masking`: Validasi gerbang logika bitwise dan masking citra.
-  * `test_06_geometry_ops`: Validasi translasi, flipping, rotasi, dan penskalaan.
-  * `test_07_metrics_and_histogram`: Validasi kalkulasi sebaran histogram dan metrik statistik.
+  * `test_02_point_operations`: Validasi matematis rumus invert, grayscale, brightness, contrast, contrast stretching, Otsu, gamma, posterize, dan solarize.
+  * `test_03_arithmetic_operations`: Validasi penjumlahan, pengurangan, perkalian, dan alpha blending citra.
+  * `test_04_boolean_operations`: Validasi gerbang logika bitwise AND, OR, XOR, dan NOT.
+  * `test_05_geometry_operations`: Validasi translasi, flipping, rotasi ortogonal/bebas, dan penskalaan.
+  * `test_06_custom_io_formats`: Validasi siklus simpan-dan-baca native parser (PBM, PGM, PPM, BMP 24-bit/8-bit, RAW).
+  * `test_07_metrics_and_histograms`: Validasi kalkulasi sebaran histogram raw (256 bin) dan kalkulasi metrik statistik dasar (`mean_intensity`, `sharpness_laplacian`, `noise_estimate`).
+  * `test_08_normalized_histograms_rgb`: Validasi histogram ternormalisasi citra RGB (tipe `np.float64`, rentang nilai $[0.0, 1.0]$, dan jumlahan probabilitas seluruh kanal $\sum h(i) = 1.0$).
+  * `test_09_normalized_histograms_grayscale_and_binary`: Validasi histogram ternormalisasi citra Grayscale dan Biner (memastikan citra biner 50/50 hanya memiliki tepat 2 bin aktif bernilai masing-masing $0.5$).
+  * `test_10_cumulative_histograms_rgb`: Validasi histogram kumulatif (CDF) citra RGB (sifat monotonik tidak menurun $\Delta \ge 0$, rentang $[0.0, 1.0]$, dan bin terakhir $j=255$ bernilai $\approx 1.0$).
+  * `test_11_cumulative_histograms_grayscale_and_binary`: Validasi CDF citra Grayscale dan Biner (memverifikasi pembentukan plateau konstan $0.5$ pada bin $1 \le j \le 254$ dan transisi ke $1.0$ pada bin $255$).
 
 ---
 

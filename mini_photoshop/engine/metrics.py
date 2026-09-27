@@ -11,6 +11,7 @@ from .core import ImageMatrix
 def compute_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
     """
     Computes 256-bin histograms for Grayscale or R, G, B channels.
+    Returns raw integer pixel-count arrays of length 256.
     """
     hists = {}
     if img.is_grayscale:
@@ -22,12 +23,51 @@ def compute_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
         hists['R'], _ = np.histogram(rgb[:, :, 0].ravel(), bins=256, range=(0, 256))
         hists['G'], _ = np.histogram(rgb[:, :, 1].ravel(), bins=256, range=(0, 256))
         hists['B'], _ = np.histogram(rgb[:, :, 2].ravel(), bins=256, range=(0, 256))
-        
+
         # Also compute luminance histogram
         gray = img.to_grayscale_array()
         hists['Luminance'], _ = np.histogram(gray.ravel(), bins=256, range=(0, 256))
-        
+
     return hists
+
+
+def compute_normalized_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
+    """
+    Computes normalized 256-bin histograms: h(i) = n(i) / N
+
+    where:
+      n(i) = number of pixels with intensity i
+      N    = total number of pixels in the image (width * height)
+
+    Each value h(i) represents the probability of a pixel having intensity i.
+    All values are in the range [0.0, 1.0] and the sum across all bins
+    equals 1.0 for each channel.
+
+    Supports binary, grayscale, and RGB images.
+    Returns the same channel keys as compute_histograms().
+    """
+    raw = compute_histograms(img)
+    n = float(img.width * img.height)
+    return {key: arr.astype(np.float64) / n for key, arr in raw.items()}
+
+
+def compute_cumulative_histograms(img: ImageMatrix) -> Dict[str, np.ndarray]:
+    """
+    Computes cumulative histograms (CDF): P(i <= j) = sum of h(i) for i = 0..j
+
+    where h(i) is the normalized histogram (probability of intensity i).
+
+    Each bin j contains the probability that a pixel has intensity <= j.
+    Properties:
+      - Same 256-bin domain and channel keys as compute_normalized_histograms()
+      - Values are in [0.0, 1.0]
+      - Monotonically non-decreasing
+      - Final bin (j=255) is approximately 1.0 for any valid image
+
+    Supports binary, grayscale, and RGB images.
+    """
+    normalized = compute_normalized_histograms(img)
+    return {key: np.cumsum(arr) for key, arr in normalized.items()}
 
 
 def compute_statistics(img: ImageMatrix) -> Dict[str, Any]:

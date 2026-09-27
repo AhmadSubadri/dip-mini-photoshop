@@ -7,7 +7,7 @@
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
 [![NumPy](https://img.shields.io/badge/Matrix_Engine-NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white)](https://numpy.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(7%2F7)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-Passing%20(11%2F11)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
 
 *Aplikasi desktop pengolahan citra digital modern dengan antarmuka gelap profesional (Adobe Photoshop-style UX), mendukung live preview, multi-tab document, split-screen before/after comparison, histogram real-time, serta parser/writer mandiri untuk format citra standar dan biner mentah (RAW).*
 
@@ -72,7 +72,14 @@
 - **Zooming & Scaling**: Resizing dimensi bebas ($W \times H$) maupun skala persentase.
 
 ### 5. 📊 Analisis Citra & Metrik Kualitas
-- **Live RGB & Grayscale Histogram**: Visualisasi sebaran intensitas piksel real-time, grafik kurva antialiased, dan tooltip nilai frekuensi saat hover.
+- **Interactive Multi-Mode Histogram**:
+  - **Normal Histogram**: Sebaran frekuensi piksel integer mentah $n(i)$ (256-bin) untuk citra Grayscale, Biner, dan RGB (kanal Red, Green, Blue, Luminance).
+  - **Normalized Histogram**: Distribusi probabilitas intensitas $h(i) = n(i) / N$ bernilai $[0.0, 1.0]$ dengan jumlahan $\sum h(i) = 1.0$.
+  - **Cumulative Histogram (CDF)**: Fungsi distribusi kumulatif $P(i \le j) = \sum_{i=0}^j h(i)$ bernilai $[0.0, 1.0]$ bersifat monoton tidak menurun dengan nilai akhir $\approx 1.0$.
+  - **Kanal Visualisasi & Smart Hover Tooltip**: Filter kanal RGB gabungan, individual R, G, B, atau Luminance/Gray, serta tooltip interaktif kontekstual (`Count`, `h(i)`, `P(i≤j)`).
+- **Statistik Deskriptif Citra Real-Time**:
+  - Menampilkan ringkasan statistik langsung pada panel bawah histogram: `Mean (μ)`, `Variance (σ²)`, dan `Std Dev (σ)`.
+  - Dialog inspeksi metadata mendalam (`Ctrl + I`): Dimensi, color mode, bit depth, min/max intensitas, median, dynamic range, dan estimasi memori.
 - **Pixel Inspector (Real-time HUD)**: Koordinat kursor $(X, Y)$, nilai intensitas kanal $[R, G, B]$, rasio perbesaran layar, dan dimensi kanvas pada status bar.
 - **Kalkulasi Kualitas Citra**:
   - *Sharpness Estimation*: Varians operator Laplacian ($\nabla^2 f$).
@@ -130,6 +137,12 @@ pytest
 | **Ambang Batas Otsu** | $\sigma_B^2(t) = \omega_0(t)\omega_1(t)\left[\mu_0(t) - \mu_1(t)\right]^2 \rightarrow \max$ |
 | **Alpha Blending** | $C(x, y) = \alpha \cdot A(x, y) + (1 - \alpha) \cdot B(x, y)$ |
 | **Rotasi Matriks** | $\begin{bmatrix} x' \\ y' \end{bmatrix} = \begin{bmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{bmatrix} \begin{bmatrix} x - x_c \\ y - y_c \end{bmatrix} + \begin{bmatrix} x_c \\ y_c \end{bmatrix}$ |
+| **Histogram Normal** | $n(i) = \sum_{x,y} \delta(f(x,y), i), \quad \sum_{i=0}^{255} n(i) = N$ |
+| **Histogram Ternormalisasi** | $h(i) = \frac{n(i)}{N}, \quad \sum_{i=0}^{255} h(i) = 1.0$ |
+| **Histogram Kumulatif (CDF)** | $P(i \le j) = \sum_{i=0}^j h(i), \quad P(i \le 255) \approx 1.0$ |
+| **Rata-rata Citra (Mean $\mu$)** | $\mu = \frac{1}{N}\sum_{x,y} f(x,y) = \sum_{i=0}^{255} i \cdot h(i)$ |
+| **Varians Citra ($\sigma^2$)** | $\sigma^2 = \frac{1}{N}\sum_{x,y} (f(x,y) - \mu)^2 = \sum_{i=0}^{255} (i - \mu)^2 \cdot h(i)$ |
+| **Standar Deviasi ($\sigma$)** | $\sigma = \sqrt{\sigma^2}$ |
 
 ---
 
@@ -151,12 +164,12 @@ mini_photoshop_project/
 │   │   ├── arithmetic_ops.py   # Operasi aritmetika 2 citra & alpha blend
 │   │   ├── boolean_ops.py      # Operasi logika bitwise (AND, OR, NOT, XOR, Mask)
 │   │   ├── geometry_ops.py     # Transformasi geometri (Translasi, Rotasi, Scaling, Flip)
-│   │   └── metrics.py          # Kalkulasi histogram, statistik, & estimasi kualitas
+│   │   └── metrics.py          # Kalkulasi histogram (Normal, Normalized, CDF), statistik, & metrik kualitas
 │   │
 │   ├── ui/                     # Komponen antarmuka pengguna (PyQt6)
 │   │   ├── main_window.py      # Jendela utama, Menu bar, Toolbar, Tab manager
 │   │   ├── canvas.py           # Canvas interaktif (Pan, Zoom, Split-screen Before/After)
-│   │   ├── histogram_widget.py # Live RGB/Grayscale histogram visualization
+│   │   ├── histogram_widget.py # Live histogram (Normal/Normalized/CDF) & panel statistik (μ, σ², σ)
 │   │   ├── styles.py           # Tema Photoshop Dark QSS
 │   │   └── dialogs/            # Dialog parameter interaktif & live preview
 │   │       ├── adjust_dialog.py
@@ -168,7 +181,7 @@ mini_photoshop_project/
 │   └── samples/                # Koleksi citra uji benchmark bawaan
 │
 └── tests/
-    └── test_engine.py          # Unit & integration tests otomatis
+    └── test_engine.py          # Unit & integration tests otomatis (11 tes)
 ```
 
 ---
