@@ -32,7 +32,7 @@ from mini_photoshop.engine.geometry_ops import (
     translate, flip_horizontal, flip_vertical, rotate_orthogonal,
     rotate_arbitrary, zoom_scale, resize_exact, crop
 )
-from mini_photoshop.engine.metrics import compute_histograms, compute_statistics
+from mini_photoshop.engine.metrics import compute_histograms, compute_normalized_histograms, compute_statistics
 
 
 class TestMiniPhotoshopEngine(unittest.TestCase):
@@ -227,6 +227,74 @@ class TestMiniPhotoshopEngine(unittest.TestCase):
         self.assertIn("mean_intensity", stats)
         self.assertIn("sharpness_laplacian", stats)
         self.assertIn("noise_estimate", stats)
+
+    def test_08_normalized_histograms_rgb(self):
+        """Normalized histogram for an RGB image: h(i) = n(i)/N per channel."""
+        norm = compute_normalized_histograms(self.img_rgb)
+
+        # Expected keys: same as raw histogram
+        self.assertIn("R", norm)
+        self.assertIn("G", norm)
+        self.assertIn("B", norm)
+        self.assertIn("Luminance", norm)
+
+        # Each channel histogram has 256 bins
+        self.assertEqual(len(norm["R"]), 256)
+        self.assertEqual(len(norm["G"]), 256)
+        self.assertEqual(len(norm["B"]), 256)
+
+        # Values must be floating-point
+        self.assertEqual(norm["R"].dtype, np.float64)
+        self.assertEqual(norm["G"].dtype, np.float64)
+        self.assertEqual(norm["B"].dtype, np.float64)
+
+        # All values must be in [0, 1]
+        for ch in ("R", "G", "B", "Luminance"):
+            self.assertGreaterEqual(float(norm[ch].min()), 0.0,
+                                    f"Channel {ch}: min value < 0")
+            self.assertLessEqual(float(norm[ch].max()), 1.0,
+                                 f"Channel {ch}: max value > 1")
+
+        # Sum of each channel must equal 1.0 (within floating-point tolerance)
+        for ch in ("R", "G", "B"):
+            self.assertAlmostEqual(float(norm[ch].sum()), 1.0, places=9,
+                                   msg=f"Channel {ch}: sum != 1.0")
+
+    def test_09_normalized_histograms_grayscale_and_binary(self):
+        """Normalized histogram for grayscale and binary images."""
+        # ── Grayscale ────────────────────────────────────────────────────────
+        norm_gray = compute_normalized_histograms(self.img_gray)
+
+        self.assertIn("Gray", norm_gray)
+        self.assertEqual(len(norm_gray["Gray"]), 256)
+        self.assertEqual(norm_gray["Gray"].dtype, np.float64)
+        self.assertGreaterEqual(float(norm_gray["Gray"].min()), 0.0)
+        self.assertLessEqual(float(norm_gray["Gray"].max()), 1.0)
+        self.assertAlmostEqual(float(norm_gray["Gray"].sum()), 1.0, places=9)
+
+        # ── Binary ───────────────────────────────────────────────────────────
+        binary_arr = np.zeros((32, 32), dtype=np.uint8)
+        binary_arr[16:, :] = 255   # bottom half white
+        img_bin = ImageMatrix(binary_arr, color_mode="BINARY")
+
+        norm_bin = compute_normalized_histograms(img_bin)
+
+        self.assertIn("Gray", norm_bin)
+        self.assertEqual(len(norm_bin["Gray"]), 256)
+        self.assertEqual(norm_bin["Gray"].dtype, np.float64)
+        self.assertGreaterEqual(float(norm_bin["Gray"].min()), 0.0)
+        self.assertLessEqual(float(norm_bin["Gray"].max()), 1.0)
+        self.assertAlmostEqual(float(norm_bin["Gray"].sum()), 1.0, places=9)
+
+        # Exactly two non-zero bins: intensity 0 and intensity 255
+        nonzero_bins = np.nonzero(norm_bin["Gray"])[0]
+        self.assertEqual(len(nonzero_bins), 2)
+        self.assertIn(0, nonzero_bins)
+        self.assertIn(255, nonzero_bins)
+
+        # Each half contributes 0.5 of total pixels
+        self.assertAlmostEqual(float(norm_bin["Gray"][0]),   0.5, places=9)
+        self.assertAlmostEqual(float(norm_bin["Gray"][255]), 0.5, places=9)
 
 
 if __name__ == "__main__":
