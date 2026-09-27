@@ -258,9 +258,9 @@ class HistogramWidget(QWidget):
         stats_bar = QHBoxLayout()
         stats_bar.setSpacing(8)
 
-        self.lbl_mean = QLabel("μ: —")
-        self.lbl_var  = QLabel("σ²: —")
-        self.lbl_std  = QLabel("σ: —")
+        self.lbl_mean = QLabel("Mean (μ): —")
+        self.lbl_var  = QLabel("Variance (σ²): —")
+        self.lbl_std  = QLabel("Std Dev (σ): —")
 
         stat_style = "color: #cccccc; font-size: 10px;"
         for lbl_s in (self.lbl_mean, self.lbl_var, self.lbl_std):
@@ -276,14 +276,14 @@ class HistogramWidget(QWidget):
         """Refresh the histogram canvas and statistics labels for the given image."""
         self.canvas.set_data(img)
         if img is None:
-            self.lbl_mean.setText("μ: —")
-            self.lbl_var.setText("σ²: —")
-            self.lbl_std.setText("σ: —")
+            self.lbl_mean.setText("Mean (μ): —")
+            self.lbl_var.setText("Variance (σ²): —")
+            self.lbl_std.setText("Std Dev (σ): —")
         else:
             stats = compute_statistics(img)
-            self.lbl_mean.setText(f"μ: {stats['mean_intensity']:.2f}")
-            self.lbl_var.setText(f"σ²: {stats['variance']:.2f}")
-            self.lbl_std.setText(f"σ: {stats['std_dev']:.2f}")
+            self.lbl_mean.setText(f"Mean (μ): {stats['mean_intensity']:.2f}")
+            self.lbl_var.setText(f"Variance (σ²): {stats['variance']:.2f}")
+            self.lbl_std.setText(f"Std Dev (σ): {stats['std_dev']:.2f}")
 
     # ── Slots ──────────────────────────────────────────────────────────────
 
