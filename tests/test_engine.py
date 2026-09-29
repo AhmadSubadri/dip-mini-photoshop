@@ -19,7 +19,8 @@ from mini_photoshop.engine.point_ops import (
     invert, to_grayscale_average, to_grayscale_luminance,
     adjust_brightness, adjust_contrast, contrast_stretching,
     threshold_manual, threshold_otsu, compute_otsu_threshold,
-    gamma_correction, posterize, solarize
+    gamma_correction, posterize, solarize,
+    log_transform, inverse_log_transform, gray_level_slicing, bit_plane_slice,
 )
 from mini_photoshop.engine.arithmetic_ops import (
     add_images, subtract_images, multiply_images, divide_images,
@@ -375,6 +376,120 @@ class TestMiniPhotoshopEngine(unittest.TestCase):
         for j, val in enumerate(plateau, start=1):
             self.assertAlmostEqual(float(val), 0.5, places=9,
                                    msg=f"CDF[{j}] should be 0.5 (plateau), got {val}")
+
+    def test_12_image_enhancement_operations(self):
+        """Validates log transform, inverse log, gray-level slicing, and bit-plane slicing."""
+
+        # ── Helper images ────────────────────────────────────────────────────
+        # Grayscale ramp: pixel at column x has intensity x (0..255 across 256 cols)
+        ramp = np.tile(np.arange(256, dtype=np.uint8), (16, 1))
+        img_ramp = ImageMatrix(ramp, color_mode="GRAYSCALE")
+
+        # Single known pixel image
+        def px(v):
+            arr = np.full((4, 4), v, dtype=np.uint8)
+            return ImageMatrix(arr, color_mode="GRAYSCALE")
+
+        # ── Log Transformation ───────────────────────────────────────────────
+        res_log = log_transform(img_ramp, c=1.0)
+
+        # 0 maps to 0
+        self.assertEqual(int(res_log.array[0, 0]), 0)
+
+        # output within [0, 255]
+        self.assertGreaterEqual(int(res_log.array.min()), 0)
+        self.assertLessEqual(int(res_log.array.max()), 255)
+
+        # monotonicity: result must be non-decreasing along the ramp
+        row = res_log.array[0].astype(np.int32)
+        diffs = np.diff(row)
+        self.assertTrue(np.all(diffs >= 0), "log_transform output is not monotonically non-decreasing")
+
+        # c <= 0 must be rejected
+        with self.assertRaises(ValueError):
+            log_transform(img_ramp, c=0.0)
+        with self.assertRaises(ValueError):
+            log_transform(img_ramp, c=-1.0)
+
+        # ── Inverse Log Transformation ───────────────────────────────────────
+        res_invlog = inverse_log_transform(img_ramp)
+
+        # 0 maps to 0
+        self.assertEqual(int(res_invlog.array[0, 0]), 0)
+
+        # 255 maps to 255
+        self.assertEqual(int(res_invlog.array[0, 255]), 255)
+
+        # output within [0, 255]
+        self.assertGreaterEqual(int(res_invlog.array.min()), 0)
+        self.assertLessEqual(int(res_invlog.array.max()), 255)
+
+        # monotonicity: non-decreasing along the ramp
+        row_inv = res_invlog.array[0].astype(np.int32)
+        diffs_inv = np.diff(row_inv)
+        self.assertTrue(np.all(diffs_inv >= 0),
+                        "inverse_log_transform output is not monotonically non-decreasing")
+
+        # ── Gray-Level Slicing ───────────────────────────────────────────────
+        img_flat = ImageMatrix(
+            np.array([[50, 100, 150, 200]], dtype=np.uint8), color_mode="GRAYSCALE"
+        )
+
+        # Suppress background (preserve_background=False):
+        # lower=99, upper=201 → pixels 100, 150, and 200 are inside (>99 and <201)
+        s = gray_level_slicing(img_flat, lower=99, upper=201, preserve_background=False)
+        self.assertEqual(int(s.array[0, 0]), 0)    # 50  → outside (50 < 99)  → 0
+        self.assertEqual(int(s.array[0, 1]), 255)  # 100 → inside  (99 < 100 < 201) → 255
+        self.assertEqual(int(s.array[0, 2]), 255)  # 150 → inside  (99 < 150 < 201) → 255
+        self.assertEqual(int(s.array[0, 3]), 255)  # 200 → inside  (99 < 200 < 201) → 255
+
+        # Preserve background (preserve_background=True):
+        # lower=99, upper=151 → only pixel 100 and 150 are inside strictly
+        p = gray_level_slicing(img_flat, lower=99, upper=151, preserve_background=True)
+        self.assertEqual(int(p.array[0, 0]), 50)   # 50  → outside → original
+        self.assertEqual(int(p.array[0, 1]), 255)  # 100 → inside  → 255
+        self.assertEqual(int(p.array[0, 2]), 255)  # 150 → inside  → 255
+        self.assertEqual(int(p.array[0, 3]), 200)  # 200 → outside → original
+
+        # Strict bounds: values exactly equal to bounds are NOT highlighted
+        edge = gray_level_slicing(img_flat, lower=100, upper=200, preserve_background=False)
+        self.assertEqual(int(edge.array[0, 1]), 0)   # 100 == lower → NOT inside (strict >)
+        self.assertEqual(int(edge.array[0, 3]), 0)   # 200 == upper → NOT inside (strict <)
+        self.assertEqual(int(edge.array[0, 2]), 255) # 150 → inside → 255
+
+        # Invalid bounds rejected
+        with self.assertRaises(ValueError):
+            gray_level_slicing(img_flat, lower=200, upper=100)  # lower >= upper
+        with self.assertRaises(ValueError):
+            gray_level_slicing(img_flat, lower=0, upper=0)      # lower == upper
+
+        # ── Bit-Plane Slicing ────────────────────────────────────────────────
+        img_128 = px(128)   # 128 = 0b10000000
+
+        # Bit 7 (MSB) of 128: bit is set → 255
+        b7 = bit_plane_slice(img_128, bit=7)
+        self.assertEqual(int(b7.array[0, 0]), 255)
+
+        # Bit 0 (LSB) of 128: bit is not set → 0
+        b0 = bit_plane_slice(img_128, bit=0)
+        self.assertEqual(int(b0.array[0, 0]), 0)
+
+        # Output contains only 0 and 255
+        vals = set(np.unique(b7.array))
+        self.assertTrue(vals.issubset({0, 255}), f"bit_plane_slice returned unexpected values: {vals}")
+
+        # Full ramp: output for any valid bit must contain only 0 and 255
+        for b in range(8):
+            plane = bit_plane_slice(img_ramp, bit=b)
+            unique = set(np.unique(plane.array))
+            self.assertTrue(unique.issubset({0, 255}),
+                            f"bit_plane_slice(bit={b}) produced non-binary values: {unique}")
+
+        # Invalid bit rejected
+        with self.assertRaises(ValueError):
+            bit_plane_slice(img_ramp, bit=8)
+        with self.assertRaises(ValueError):
+            bit_plane_slice(img_ramp, bit=-1)
 
 
 if __name__ == "__main__":

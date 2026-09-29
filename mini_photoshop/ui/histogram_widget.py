@@ -280,6 +280,14 @@ class HistogramWidget(QWidget):
             self.lbl_var.setText("Variance (σ²): —")
             self.lbl_std.setText("Std Dev (σ): —")
         else:
+            # Auto-switch channel selector to match the image's color mode
+            if img.is_grayscale:
+                if self.channel_combo.currentIndex() != 4:  # "Luminance / Gray"
+                    self.channel_combo.setCurrentIndex(4)
+            else:
+                if self.channel_combo.currentIndex() == 4:
+                    self.channel_combo.setCurrentIndex(0)   # "RGB"
+
             stats = compute_statistics(img)
             self.lbl_mean.setText(f"Mean (μ): {stats['mean_intensity']:.2f}")
             self.lbl_var.setText(f"Variance (σ²): {stats['variance']:.2f}")

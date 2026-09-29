@@ -9,6 +9,12 @@ Covers all point-level transformations taught in P6:
 6. Gamma Correction (Power Law)
 7. Bit-Depth Quantization / Posterize
 8. Solarization
+
+Image Enhancement (P9):
+9.  Log Transformation
+10. Inverse Log Transformation
+11. Gray-Level Slicing
+12. Bit-Plane Slicing
 """
 
 import numpy as np
@@ -186,3 +192,105 @@ def solarize(img: ImageMatrix, threshold: int = 128) -> ImageMatrix:
     mask = arr >= threshold
     arr[mask] = 255 - arr[mask]
     return ImageMatrix(arr, color_mode=img.color_mode)
+
+
+# =============================================================================
+# Image Enhancement (P9)
+# =============================================================================
+
+def log_transform(img: ImageMatrix, c: float = 1.0) -> ImageMatrix:
+    """
+    Log transformation: s = c * log(1 + r)
+
+    Lecture formula (slide p.22): s = c log(1 + r)
+    Uses the raw 8-bit pixel value r in [0, 255] and natural logarithm.
+    c > 0 controls output scaling; c ≈ 46 maps the full input range to [0, 255].
+    Result is clipped to [0, 255] and returned as uint8.
+    """
+    if c <= 0:
+        raise ValueError(f"c must be positive, got {c}")
+    arr = img.array.astype(np.float64)
+    result = c * np.log(1.0 + arr)
+    return ImageMatrix(np.clip(result, 0, 255).astype(np.uint8), color_mode=img.color_mode)
+
+
+def inverse_log_transform(img: ImageMatrix) -> ImageMatrix:
+    """
+    Inverse log transformation (normalized exponential mapping).
+
+    The lecture (slide p.22) describes the inverse-log as producing the
+    opposite behavior of the log transformation but does not write an
+    explicit formula.  This implementation uses the normalized exponential:
+
+        s = 256^(r / 255) - 1
+
+    which maps r=0 -> s=0 and r=255 -> s=255 exactly, producing an
+    exponential (concave-down) curve — the graphical inverse of the log curve
+    shown in the lecture slides.
+    """
+    arr = img.array.astype(np.float64)
+    result = np.power(256.0, arr / 255.0) - 1.0
+    return ImageMatrix(np.clip(result, 0, 255).astype(np.uint8), color_mode=img.color_mode)
+
+
+def gray_level_slicing(
+    img: ImageMatrix,
+    lower: int,
+    upper: int,
+    preserve_background: bool = True,
+) -> ImageMatrix:
+    """
+    Gray-level slicing (lecture slide p.49-54).
+
+    Highlights a specific intensity range using strict inequalities,
+    matching the MATLAB examples in the lecture:
+
+        mask = (pixel > lower) & (pixel < upper)
+
+    preserve_background=True  (Approach 2 in lecture):
+        inside range  -> 255
+        outside range -> original pixel value
+
+    preserve_background=False (Approach 1 in lecture):
+        inside range  -> 255
+        outside range -> 0
+
+    Returns a grayscale ImageMatrix.  Input is converted to grayscale
+    to match the lecture examples.
+
+    Raises ValueError if not (0 <= lower < upper <= 255).
+    """
+    if not (0 <= lower < upper <= 255):
+        raise ValueError(
+            f"Bounds must satisfy 0 <= lower < upper <= 255, got lower={lower}, upper={upper}"
+        )
+    gray = img.to_grayscale_array().astype(np.int32)
+    mask = (gray > lower) & (gray < upper)
+
+    if preserve_background:
+        result = gray.copy()
+        result[mask] = 255
+    else:
+        result = np.where(mask, 255, 0)
+
+    return ImageMatrix(result.astype(np.uint8), color_mode="GRAYSCALE")
+
+
+def bit_plane_slice(img: ImageMatrix, bit: int) -> ImageMatrix:
+    """
+    Bit-plane slicing (lecture slide p.56-60).
+
+    Extracts one bit-plane from the grayscale representation.
+    Bit numbering follows the lecture (b7 b6 b5 b4 b3 b2 b1 b0):
+        bit 0 = LSB, bit 7 = MSB
+
+    Extraction: ((gray >> bit) & 1) * 255
+
+    Returns a grayscale ImageMatrix containing only 0 and 255.
+    Raises ValueError if bit not in [0, 7].
+    """
+    if not (0 <= bit <= 7):
+        raise ValueError(f"bit must be in [0, 7], got {bit}")
+    gray = img.to_grayscale_array()
+    plane = (((gray.astype(np.uint8) >> bit) & 1) * 255).astype(np.uint8)
+    return ImageMatrix(plane, color_mode="GRAYSCALE")

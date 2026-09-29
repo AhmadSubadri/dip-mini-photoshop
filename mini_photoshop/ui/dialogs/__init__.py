@@ -1,7 +1,11 @@
 """
 Dialogs package for Mini Photoshop
 """
-from .adjust_dialog import BrightnessContrastDialog, ThresholdDialog, GammaDialog, PosterizeDialog
+from .adjust_dialog import (
+    BrightnessContrastDialog, ThresholdDialog, GammaDialog, PosterizeDialog,
+    LogTransformDialog, InverseLogTransformDialog,
+    GrayLevelSlicingDialog, BitPlaneSlicingDialog,
+)
 from .arithmetic_dialog import ArithmeticOperationDialog
 from .geometry_dialog import RotateDialog, TranslateDialog, ScaleDialog
 from .info_dialog import ImageInfoDialog
@@ -12,10 +16,14 @@ __all__ = [
     "ThresholdDialog",
     "GammaDialog",
     "PosterizeDialog",
+    "LogTransformDialog",
+    "InverseLogTransformDialog",
+    "GrayLevelSlicingDialog",
+    "BitPlaneSlicingDialog",
     "ArithmeticOperationDialog",
     "RotateDialog",
     "TranslateDialog",
     "ScaleDialog",
     "ImageInfoDialog",
-    "RawImportDialog"
+    "RawImportDialog",
 ]
