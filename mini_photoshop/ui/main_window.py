@@ -33,7 +33,9 @@ from .histogram_widget import HistogramWidget
 from .dialogs import (
     BrightnessContrastDialog, ThresholdDialog, GammaDialog,
     PosterizeDialog, ArithmeticOperationDialog, RotateDialog,
-    TranslateDialog, ScaleDialog, ImageInfoDialog, RawImportDialog
+    TranslateDialog, ScaleDialog, ImageInfoDialog, RawImportDialog,
+    LogTransformDialog, InverseLogTransformDialog,
+    GrayLevelSlicingDialog, BitPlaneSlicingDialog,
 )
 from .styles import PHOTOSHOP_DARK_THEME
 
@@ -267,6 +269,25 @@ class MainWindow(QMainWindow):
         act_solar = QAction("&Solarize Effect...", self)
         act_solar.triggered.connect(self.action_solarize)
         image_menu.addAction(act_solar)
+
+        image_menu.addSeparator()
+
+        # --- Image Enhancement (P9) ---
+        act_log = QAction("&Log Transformation...", self)
+        act_log.triggered.connect(self.action_log_transform)
+        image_menu.addAction(act_log)
+
+        act_invlog = QAction("&Inverse Log Transformation...", self)
+        act_invlog.triggered.connect(self.action_inverse_log_transform)
+        image_menu.addAction(act_invlog)
+
+        act_gls = QAction("&Gray-Level Slicing...", self)
+        act_gls.triggered.connect(self.action_gray_level_slicing)
+        image_menu.addAction(act_gls)
+
+        act_bps = QAction("&Bit-Plane Slicing...", self)
+        act_bps.triggered.connect(self.action_bit_plane_slicing)
+        image_menu.addAction(act_bps)
 
         # 5. ADJUSTMENTS MENU
         adj_menu = mb.addMenu("&Adjustments")
@@ -677,6 +698,18 @@ class MainWindow(QMainWindow):
         t, ok = QInputDialog.getInt(self, "Solarize", "Threshold (0 - 255):", 128, 0, 255)
         if ok:
             self._apply_quick_point_op("Solarize", lambda img: solarize(img, t))
+
+    def action_log_transform(self):
+        self._run_preview_dialog(LogTransformDialog, "Log Transformation")
+
+    def action_inverse_log_transform(self):
+        self._run_preview_dialog(InverseLogTransformDialog, "Inverse Log Transformation")
+
+    def action_gray_level_slicing(self):
+        self._run_preview_dialog(GrayLevelSlicingDialog, "Gray-Level Slicing")
+
+    def action_bit_plane_slicing(self):
+        self._run_preview_dialog(BitPlaneSlicingDialog, "Bit-Plane Slicing")
 
     # ==========================================================================
     # Interactive Modals with Live Preview

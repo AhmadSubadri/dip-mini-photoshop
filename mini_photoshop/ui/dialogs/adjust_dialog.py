@@ -1,18 +1,21 @@
 """
 Adjustment Dialogs with Real-Time Live Preview for Mini Photoshop.
-Includes Brightness & Contrast, Thresholding (Manual & Otsu), Gamma, and Posterization.
+Includes Brightness & Contrast, Thresholding (Manual & Otsu), Gamma, Posterization,
+and Image Enhancement operations: Log Transform, Inverse Log Transform,
+Gray-Level Slicing, and Bit-Plane Slicing.
 """
 
 from typing import Callable, Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox
+    QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ...engine.core import ImageMatrix
 from ...engine.point_ops import (
     adjust_brightness, adjust_contrast, threshold_manual,
-    threshold_otsu, compute_otsu_threshold, gamma_correction, posterize
+    threshold_otsu, compute_otsu_threshold, gamma_correction, posterize,
+    log_transform, inverse_log_transform, gray_level_slicing, bit_plane_slice,
 )
 
 
@@ -218,5 +221,197 @@ class PosterizeDialog(BaseLivePreviewDialog):
     def _recalculate(self):
         bits = self.p_slider.value()
         res = posterize(self.original_img, bits)
+        self.result_img = res
+        self.previewUpdated.emit(res)
+
+
+# =============================================================================
+# Image Enhancement Dialogs (P9)
+# =============================================================================
+
+class LogTransformDialog(BaseLivePreviewDialog):
+    """
+    Log Transformation: s = c * log(1 + r)
+    Default c ≈ 46 so the full input range maps close to [0, 255].
+    """
+    # c_auto = 255 / ln(256) ≈ 45.99
+    _C_AUTO = 255.0 / float(__import__("math").log(256))
+
+    def __init__(self, original_img: ImageMatrix, parent=None):
+        super().__init__(original_img, "Log Transformation  [s = c · ln(1 + r)]", parent)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("c (scale):"))
+        self.c_spin = QDoubleSpinBox()
+        self.c_spin.setRange(0.1, 255.0)
+        self.c_spin.setSingleStep(0.5)
+        self.c_spin.setDecimals(2)
+        self.c_spin.setValue(round(self._C_AUTO, 2))
+        row.addWidget(self.c_spin)
+        self.content_layout.addLayout(row)
+
+        # Slider maps 0.1–255.0 in steps of 0.1  →  int range 1..2550
+        self.c_slider = QSlider(Qt.Orientation.Horizontal)
+        self.c_slider.setRange(1, 2550)
+        self.c_slider.setValue(int(round(self._C_AUTO * 10)))
+        self.content_layout.addWidget(self.c_slider)
+
+        note = QLabel("c ≈ 46 maps full input [0–255] to output [0–255]")
+        note.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.content_layout.addWidget(note)
+
+        self.c_slider.valueChanged.connect(lambda v: self.c_spin.setValue(v / 10.0))
+        self.c_spin.valueChanged.connect(lambda v: self.c_slider.setValue(int(v * 10)))
+        self.c_slider.valueChanged.connect(self._recalculate)
+        self._recalculate()
+
+    def _recalculate(self):
+        c = self.c_slider.value() / 10.0
+        try:
+            res = log_transform(self.original_img, c)
+        except ValueError:
+            return
+        self.result_img = res
+        self.previewUpdated.emit(res)
+
+
+class InverseLogTransformDialog(BaseLivePreviewDialog):
+    """
+    Inverse log transformation using the normalized exponential mapping:
+        s = 256^(r / 255) - 1
+    Maps r=0 → s=0, r=255 → s=255. No adjustable parameter.
+    """
+    def __init__(self, original_img: ImageMatrix, parent=None):
+        super().__init__(original_img, "Inverse Log Transformation  [s = 256^(r/255) − 1]", parent)
+
+        info = QLabel(
+            "Formula: s = 256^(r/255) − 1\n"
+            "Maps 0 → 0, 255 → 255.\n"
+            "Expands bright values; compresses dark values\n"
+            "(opposite of log transformation)."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #cccccc; font-size: 11px;")
+        self.content_layout.addWidget(info)
+
+        res = inverse_log_transform(self.original_img)
+        self.result_img = res
+        self.previewUpdated.emit(res)
+
+
+class GrayLevelSlicingDialog(BaseLivePreviewDialog):
+    """
+    Gray-level slicing (lecture slide p.49-54).
+    Highlights pixels strictly between lower and upper bounds.
+    """
+    def __init__(self, original_img: ImageMatrix, parent=None):
+        super().__init__(original_img, "Gray-Level Slicing", parent)
+
+        # Lower bound
+        lo_row = QHBoxLayout()
+        lo_row.addWidget(QLabel("Lower bound:"))
+        self.lo_spin = QSpinBox()
+        self.lo_spin.setRange(0, 254)
+        self.lo_spin.setValue(100)
+        lo_row.addWidget(self.lo_spin)
+        self.content_layout.addLayout(lo_row)
+
+        self.lo_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lo_slider.setRange(0, 254)
+        self.lo_slider.setValue(100)
+        self.content_layout.addWidget(self.lo_slider)
+
+        # Upper bound
+        hi_row = QHBoxLayout()
+        hi_row.addWidget(QLabel("Upper bound:"))
+        self.hi_spin = QSpinBox()
+        self.hi_spin.setRange(1, 255)
+        self.hi_spin.setValue(200)
+        hi_row.addWidget(self.hi_spin)
+        self.content_layout.addLayout(hi_row)
+
+        self.hi_slider = QSlider(Qt.Orientation.Horizontal)
+        self.hi_slider.setRange(1, 255)
+        self.hi_slider.setValue(200)
+        self.content_layout.addWidget(self.hi_slider)
+
+        note = QLabel("Pixels with value > lower AND < upper → 255  (strict bounds, matching lecture)")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.content_layout.addWidget(note)
+
+        # Mode
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Preserve Background")
+        self.mode_combo.addItem("Suppress Background")
+        mode_row.addWidget(self.mode_combo)
+        self.content_layout.addLayout(mode_row)
+
+        # Wire sliders ↔ spinboxes
+        self.lo_slider.valueChanged.connect(self.lo_spin.setValue)
+        self.lo_spin.valueChanged.connect(self.lo_slider.setValue)
+        self.hi_slider.valueChanged.connect(self.hi_spin.setValue)
+        self.hi_spin.valueChanged.connect(self.hi_slider.setValue)
+
+        self.lo_slider.valueChanged.connect(self._recalculate)
+        self.hi_slider.valueChanged.connect(self._recalculate)
+        self.mode_combo.currentIndexChanged.connect(self._recalculate)
+
+        self._recalculate()
+
+    def _recalculate(self):
+        lower = self.lo_slider.value()
+        upper = self.hi_slider.value()
+        if lower >= upper:
+            return
+        preserve = self.mode_combo.currentIndex() == 0
+        try:
+            res = gray_level_slicing(self.original_img, lower, upper, preserve)
+        except ValueError:
+            return
+        self.result_img = res
+        self.previewUpdated.emit(res)
+
+
+class BitPlaneSlicingDialog(BaseLivePreviewDialog):
+    """
+    Bit-plane slicing (lecture slide p.56-60).
+    Extracts one bit-plane as a binary 0/255 grayscale image.
+    Bit 0 = LSB, Bit 7 = MSB.
+    """
+    def __init__(self, original_img: ImageMatrix, parent=None):
+        super().__init__(original_img, "Bit-Plane Slicing", parent)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Bit plane (0–7):"))
+        self.bit_spin = QSpinBox()
+        self.bit_spin.setRange(0, 7)
+        self.bit_spin.setValue(7)
+        row.addWidget(self.bit_spin)
+        self.content_layout.addLayout(row)
+
+        self.bit_slider = QSlider(Qt.Orientation.Horizontal)
+        self.bit_slider.setRange(0, 7)
+        self.bit_slider.setValue(7)
+        self.content_layout.addWidget(self.bit_slider)
+
+        note = QLabel("Bit 0 = LSB  |  Bit 7 = MSB\nOutput: binary image (0 or 255 per pixel)")
+        note.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.content_layout.addWidget(note)
+
+        self.bit_slider.valueChanged.connect(self.bit_spin.setValue)
+        self.bit_spin.valueChanged.connect(self.bit_slider.setValue)
+        self.bit_slider.valueChanged.connect(self._recalculate)
+
+        self._recalculate()
+
+    def _recalculate(self):
+        bit = self.bit_slider.value()
+        try:
+            res = bit_plane_slice(self.original_img, bit)
+        except ValueError:
+            return
         self.result_img = res
         self.previewUpdated.emit(res)
