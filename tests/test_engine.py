@@ -35,7 +35,9 @@ from mini_photoshop.engine.geometry_ops import (
 )
 from mini_photoshop.engine.metrics import (
     compute_histograms, compute_normalized_histograms,
-    compute_cumulative_histograms, compute_statistics
+    compute_cumulative_histograms, compute_statistics,
+    histogram_equalization_lut, histogram_equalization,
+    histogram_specification_lut, histogram_specification,
 )
 
 
@@ -490,6 +492,281 @@ class TestMiniPhotoshopEngine(unittest.TestCase):
             bit_plane_slice(img_ramp, bit=8)
         with self.assertRaises(ValueError):
             bit_plane_slice(img_ramp, bit=-1)
+
+    # =========================================================================
+    # TEST 13 — Histogram Equalization
+    # =========================================================================
+
+    def test_13_histogram_equalization(self):
+        """Tests A-D: histogram_equalization_lut and histogram_equalization."""
+
+        # ── TEST A: Formula verification on a 2-pixel image ──────────────────
+        # Image: [0, 255]  →  n=2, CDF[0]=0.5, CDF[255]=1.0
+        # LUT[0]   = floor(255 * 0.5)  = floor(127.5) = 127
+        # LUT[255] = floor(255 * 1.0)  = 255
+        arr_two = np.array([[0, 255]], dtype=np.uint8)
+        img_two = ImageMatrix(arr_two, color_mode="GRAYSCALE")
+        lut_two = histogram_equalization_lut(img_two)
+
+        self.assertEqual(int(lut_two[0]), 127,
+                         "LUT[0] must be floor(255*0.5)=127 for 2-pixel [0,255] image")
+        self.assertEqual(int(lut_two[255]), 255,
+                         "LUT[255] must be 255 (CDF at max intensity = 1.0)")
+
+        # Verify plateau: intensities 1..254 have same CDF=0.5 → LUT=127
+        for i in range(1, 255):
+            self.assertEqual(int(lut_two[i]), 127,
+                             f"LUT[{i}] must be 127 (plateau) for 2-pixel [0,255] image")
+
+        # ── TEST B: LUT properties ────────────────────────────────────────────
+        lut = histogram_equalization_lut(self.img_gray)
+
+        self.assertEqual(lut.shape, (256,), "LUT shape must be (256,)")
+        self.assertEqual(lut.dtype, np.uint8, "LUT dtype must be uint8")
+        self.assertGreaterEqual(int(lut.min()), 0,   "LUT values must be >= 0")
+        self.assertLessEqual(int(lut.max()), 255,    "LUT values must be <= 255")
+        self.assertEqual(int(lut[255]), 255,         "LUT[255] must always == 255")
+
+        # Monotonically non-decreasing
+        diffs = np.diff(lut.astype(np.int32))
+        self.assertTrue(np.all(diffs >= 0),
+                        "Equalization LUT must be monotonically non-decreasing")
+
+        # ── TEST C: RGB input auto-converts to GRAYSCALE ─────────────────────
+        result_rgb = histogram_equalization(self.img_rgb)
+
+        self.assertEqual(result_rgb.color_mode, "GRAYSCALE",
+                         "histogram_equalization must return GRAYSCALE for RGB input")
+        self.assertEqual(result_rgb.channels, 1,
+                         "histogram_equalization output must be single-channel")
+        self.assertEqual(result_rgb.array.dtype, np.uint8,
+                         "Output dtype must be uint8")
+        self.assertGreaterEqual(int(result_rgb.array.min()), 0)
+        self.assertLessEqual(int(result_rgb.array.max()), 255)
+
+        # ── TEST D: Controlled example with manually computed expected LUT ────
+        # Image: 4×1, intensities [0, 100, 100, 200]
+        # n=4, H[0]=1, H[100]=2, H[200]=1
+        # CDF[0]   = 1/4 = 0.25    → floor(255*0.25)   = floor(63.75)  = 63
+        # CDF[1..99]  = 0.25        → floor(63.75) = 63
+        # CDF[100] = 3/4 = 0.75    → floor(255*0.75)   = floor(191.25) = 191
+        # CDF[101..199] = 0.75      → 191
+        # CDF[200] = 4/4 = 1.0     → floor(255*1.0)    = 255
+        arr_ctrl = np.array([[0, 100, 100, 200]], dtype=np.uint8)
+        img_ctrl = ImageMatrix(arr_ctrl, color_mode="GRAYSCALE")
+        lut_ctrl = histogram_equalization_lut(img_ctrl)
+
+        self.assertEqual(int(lut_ctrl[0]),   63,  "LUT[0]   must be floor(255*0.25)=63")
+        self.assertEqual(int(lut_ctrl[50]),  63,  "LUT[50]  must be 63 (plateau 1..99)")
+        self.assertEqual(int(lut_ctrl[99]),  63,  "LUT[99]  must be 63 (plateau 1..99)")
+        self.assertEqual(int(lut_ctrl[100]), 191, "LUT[100] must be floor(255*0.75)=191")
+        self.assertEqual(int(lut_ctrl[150]), 191, "LUT[150] must be 191 (plateau 101..199)")
+        self.assertEqual(int(lut_ctrl[200]), 255, "LUT[200] must be 255")
+        self.assertEqual(int(lut_ctrl[255]), 255, "LUT[255] must be 255 (CDF plateau)")
+
+        # Verify actual equalized image output
+        result_ctrl = histogram_equalization(img_ctrl)
+        self.assertEqual(result_ctrl.color_mode, "GRAYSCALE")
+        self.assertEqual(int(result_ctrl.array[0, 0]), 63)   # pixel 0   → 63
+        self.assertEqual(int(result_ctrl.array[0, 1]), 191)  # pixel 100 → 191
+        self.assertEqual(int(result_ctrl.array[0, 2]), 191)  # pixel 100 → 191
+        self.assertEqual(int(result_ctrl.array[0, 3]), 255)  # pixel 200 → 255
+
+    # =========================================================================
+    # TEST 14 — Histogram Specification
+    # =========================================================================
+
+    def test_14_histogram_specification(self):
+        """Tests E-I: histogram_specification_lut and histogram_specification."""
+
+        # ── TEST E: Validation — invalid target raises ValueError ─────────────
+        img_gray = self.img_gray
+
+        # Wrong shape
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, np.ones(10))
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, np.ones(255) / 255)
+
+        # Negative values
+        bad_neg = np.full(256, 1.0 / 256)
+        bad_neg[0] = -0.1
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, bad_neg)
+
+        # NaN
+        bad_nan = np.full(256, 1.0 / 256)
+        bad_nan[5] = float("nan")
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, bad_nan)
+
+        # Infinity
+        bad_inf = np.full(256, 1.0 / 256)
+        bad_inf[10] = float("inf")
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, bad_inf)
+
+        # All-zero
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, np.zeros(256))
+
+        # Non-normalized (sum = 2.0, clearly outside tolerance)
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, np.full(256, 2.0 / 256))
+
+        # Non-normalized (sum = 0.5, clearly outside tolerance)
+        with self.assertRaises(ValueError):
+            histogram_specification_lut(img_gray, np.full(256, 0.5 / 256))
+
+        # ── TEST F: Nearest-CDF mapping correctness ───────────────────────────
+        # Source: 1×4 image with intensities [0, 100, 100, 200]
+        # HistEq[0]   = floor(255*0.25) = 63
+        # HistEq[100] = floor(255*0.75) = 191
+        # HistEq[200] = floor(255*1.0)  = 255
+        #
+        # Target: uniform → SpecEq[j] = floor(255 * (j+1)/256) for j=0..255
+        # For uniform target, argmin |HistEq[i] - SpecEq[j]| maps:
+        #   HistEq[0]=63   → j where SpecEq[j] closest to 63
+        #   HistEq[100]=191 → j where SpecEq[j] closest to 191
+        #   HistEq[200]=255 → j where SpecEq[j] closest to 255
+        arr_src = np.array([[0, 100, 100, 200]], dtype=np.uint8)
+        img_src = ImageMatrix(arr_src, color_mode="GRAYSCALE")
+
+        # Build uniform target manually for verification
+        uniform_target = np.full(256, 1.0 / 256, dtype=np.float64)
+
+        # Compute expected SpecEq manually
+        cdf_uniform = np.cumsum(uniform_target)
+        spec_eq = np.floor(255.0 * cdf_uniform).astype(np.int32)
+
+        # Compute expected mapping for the key source intensities
+        hist_eq_0   = 63
+        hist_eq_100 = 191
+        hist_eq_200 = 255
+
+        def expected_j(hist_eq_val):
+            diffs = np.abs(hist_eq_val - spec_eq)
+            return int(np.argmin(diffs))
+
+        exp_j_0   = expected_j(hist_eq_0)
+        exp_j_100 = expected_j(hist_eq_100)
+        exp_j_200 = expected_j(hist_eq_200)
+
+        lut_f = histogram_specification_lut(img_src, uniform_target)
+
+        self.assertEqual(int(lut_f[0]),   exp_j_0,
+                         f"LUT[0] must map to j={exp_j_0} (nearest SpecEq to HistEq=63)")
+        self.assertEqual(int(lut_f[100]), exp_j_100,
+                         f"LUT[100] must map to j={exp_j_100} (nearest SpecEq to HistEq=191)")
+        self.assertEqual(int(lut_f[200]), exp_j_200,
+                         f"LUT[200] must map to j={exp_j_200} (nearest SpecEq to HistEq=255)")
+
+        # Tie-breaking: smallest j wins.
+        # Build a pathological target where SpecEq[j1] == SpecEq[j2] for some j1<j2.
+        # Target that puts all mass at bin 255 → SpecEq[j]=0 for j<255, SpecEq[255]=255
+        # A source with HistEq[i]=0 should map to j=0 (first tie, not j=254)
+        tie_target = np.zeros(256, dtype=np.float64)
+        tie_target[255] = 1.0
+        lut_tie = histogram_specification_lut(img_src, tie_target)
+        # HistEq[0]=63 → SpecEq is 0 for j=0..254, then 255 at j=255
+        # |63-0|=63, |63-255|=192 → best match is all j in 0..254 (tie at 63)
+        # Tie-breaking must pick j=0
+        self.assertEqual(int(lut_tie[0]), 0,
+                         "Tie-breaking must select smallest j")
+
+        # ── TEST G: Output properties ─────────────────────────────────────────
+        uniform_t = np.full(256, 1.0 / 256, dtype=np.float64)
+
+        result_g = histogram_specification(img_src, uniform_t)
+        self.assertEqual(result_g.color_mode, "GRAYSCALE",
+                         "histogram_specification output must be GRAYSCALE")
+        self.assertEqual(result_g.array.dtype, np.uint8)
+        self.assertEqual(result_g.array.shape, arr_src.shape)
+        self.assertGreaterEqual(int(result_g.array.min()), 0)
+        self.assertLessEqual(int(result_g.array.max()), 255)
+
+        # RGB input → GRAYSCALE output
+        result_rgb = histogram_specification(self.img_rgb, uniform_t)
+        self.assertEqual(result_rgb.color_mode, "GRAYSCALE",
+                         "histogram_specification must return GRAYSCALE for RGB input")
+        self.assertEqual(result_rgb.channels, 1)
+
+        # ── TEST H: Uniform target behavior ──────────────────────────────────
+        # Specification with uniform target should behave conceptually like
+        # equalization: both produce valid grayscale output.
+        # We verify outputs match or are very close (within discretization).
+        uniform_t2 = np.full(256, 1.0 / 256, dtype=np.float64)
+        result_eq   = histogram_equalization(self.img_gray)
+        result_spec = histogram_specification(self.img_gray, uniform_t2)
+
+        self.assertEqual(result_eq.color_mode, "GRAYSCALE")
+        self.assertEqual(result_spec.color_mode, "GRAYSCALE")
+        self.assertEqual(result_eq.array.dtype, np.uint8)
+        self.assertEqual(result_spec.array.dtype, np.uint8)
+
+        # Outputs should be identical for uniform target (same floor-CDF math)
+        # The LUT from spec with uniform target reconstructs via nearest-match;
+        # within the floor(255*cdf) discretization both should match.
+        lut_eq   = histogram_equalization_lut(self.img_gray)
+        lut_spec = histogram_specification_lut(self.img_gray, uniform_t2)
+        self.assertTrue(
+            np.all(lut_eq == lut_spec),
+            "LUT from specification(uniform) must equal LUT from equalization "
+            "(both use floor(255*CDF) and nearest-CDF matching reduces to identity)"
+        )
+
+        # ── TEST I: Lecture L=8 golden test via production engine ────────────
+        # Reproduce the slide P.42-47 example end-to-end through the real
+        # 256-level implementation.
+        #
+        # Source histogram (slide P.28/P.42), n=4096:
+        #   intensity 0: 790 px, 1: 1023, 2: 850, 3: 656,
+        #   4: 329,         5: 245,   6: 122,  7: 81
+        # Intensities 0-7 used as uint8 pixel values.
+        #
+        # Target Pz (slide P.43) derived from the CDF table on P.45:
+        #   tgt_cdf = [0, 0, 0, 0.15, 0.35, 0.65, 0.85, 1.0]
+        #   → Pz = [0, 0, 0, 0.15, 0.20, 0.30, 0.20, 0.15] at levels 0..7
+        #
+        # Lecture expected mapping (P.46):
+        #   source 0 → target 3
+        #   source 1 → target 4
+        #   source 2 → target 5
+        #   source 3 → target 6
+        #   source 4 → target 6
+        #   source 5 → target 7
+        #   source 6 → target 7
+        #   source 7 → target 7
+
+        # Build the synthetic source image (4096 pixels, intensities 0..7)
+        lec_counts = np.array([790, 1023, 850, 656, 329, 245, 122, 81], dtype=np.int64)
+        assert lec_counts.sum() == 4096
+        src_pixels = np.repeat(np.arange(8, dtype=np.uint8), lec_counts)
+        img_lec = ImageMatrix(
+            src_pixels.reshape(1, -1), color_mode="GRAYSCALE"
+        )
+
+        # Build the 256-bin target probability array.
+        # Pz lives at bins 0..7; all other bins are zero.
+        tgt_cdf_8 = np.array([0.0, 0.0, 0.0, 0.15, 0.35, 0.65, 0.85, 1.0])
+        pz_8 = np.diff(np.concatenate([[0.0], tgt_cdf_8]))  # [0,0,0,0.15,0.20,0.30,0.20,0.15]
+        target_prob_lec = np.zeros(256, dtype=np.float64)
+        target_prob_lec[:8] = pz_8
+        self.assertAlmostEqual(float(target_prob_lec.sum()), 1.0, places=12)
+
+        # Call the production engine
+        lut_lec = histogram_specification_lut(img_lec, target_prob_lec)
+
+        # Verify the mapping for source intensities 0..7 matches lecture P.46 exactly
+        expected_mapping = {0: 3, 1: 4, 2: 5, 3: 6, 4: 6, 5: 7, 6: 7, 7: 7}
+        for src_intensity, expected_target in expected_mapping.items():
+            self.assertEqual(
+                int(lut_lec[src_intensity]),
+                expected_target,
+                f"Lecture golden test: source intensity {src_intensity} must map "
+                f"to target {expected_target}, got {lut_lec[src_intensity]}. "
+                f"(slide P.46: r{src_intensity} -> z{expected_target})"
+            )
 
 
 if __name__ == "__main__":

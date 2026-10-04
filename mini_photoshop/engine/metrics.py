@@ -126,3 +126,148 @@ def compute_statistics(img: ImageMatrix) -> Dict[str, Any]:
         "bit_depth": img.metadata.bit_depth,
         "memory_size_kb": f"{img.array.nbytes / 1024:.2f} KB"
     }
+
+
+# =============================================================================
+# Histogram Equalization & Specification (P10)
+# =============================================================================
+
+def _grayscale_cdf(img: ImageMatrix) -> np.ndarray:
+    """
+    Returns the grayscale CDF for *img* as a float64 array of shape (256,).
+
+    For any color mode (RGB, RGBA, GRAYSCALE, BINARY) the image is first
+    reduced to a single luminance channel via ImageMatrix.to_grayscale_array(),
+    so the CDF always represents a single-channel grayscale distribution.
+
+    Reuses compute_normalized_histograms() and compute_cumulative_histograms()
+    from the existing infrastructure, selecting the correct channel key:
+      - GRAYSCALE / BINARY  →  key "Gray"
+      - RGB / RGBA          →  key "Luminance"  (grayscale equivalent already
+                                computed inside compute_histograms)
+    """
+    if img.width * img.height == 0:
+        raise ValueError("Image has zero pixels.")
+    cdfs = compute_cumulative_histograms(img)
+    # "Gray" is present for grayscale/binary; "Luminance" for RGB/RGBA.
+    gray_cdf = cdfs.get("Gray")
+    return gray_cdf if gray_cdf is not None else cdfs["Luminance"]
+
+
+def histogram_equalization_lut(img: ImageMatrix) -> np.ndarray:
+    """
+    Computes the 256-entry histogram equalization LUT.
+
+    Implements the lecture (slide P.32) C pseudocode exactly:
+        Hist[i]   = normalized histogram (probability) of intensity i
+        CDF[i]    = sum(Hist[0..i])
+        HistEq[i] = floor(255 * CDF[i])
+
+    The LUT maps every source intensity i (0-255) to a new intensity.
+
+    Input:  ImageMatrix — any color mode; converted to grayscale internally.
+    Output: np.ndarray shape (256,) dtype uint8, monotonically non-decreasing,
+            values in [0, 255].
+    """
+    cdf = _grayscale_cdf(img)                              # reuse existing infrastructure
+    lut = np.floor(255.0 * cdf).astype(np.uint8)          # floor(255 * CDF) as per lecture
+    return lut
+
+
+def histogram_equalization(img: ImageMatrix) -> ImageMatrix:
+    """
+    Applies histogram equalization to the image.
+
+    Converts any input to grayscale, applies the equalization LUT
+    (see histogram_equalization_lut), and returns a new GRAYSCALE ImageMatrix.
+
+    Output color_mode is always "GRAYSCALE".
+    """
+    lut = histogram_equalization_lut(img)
+    gray = img.to_grayscale_array()
+    result = lut[gray]                                     # vectorized LUT lookup
+    return ImageMatrix(result, color_mode="GRAYSCALE")
+
+
+def histogram_specification_lut(img: ImageMatrix, target_prob: np.ndarray) -> np.ndarray:
+    """
+    Computes the 256-entry histogram specification (matching) LUT.
+
+    Implements the lecture (slides P.38-39, P.48-49) three-step algorithm:
+
+    Step 1 — Equalize source:
+        source_CDF[i] = cumsum(source_normalized_histogram)[i]
+        HistEq[i]     = floor(255 * source_CDF[i])
+
+    Step 2 — Equalize target:
+        target_CDF[j] = cumsum(target_prob)[j]
+        SpecEq[j]     = floor(255 * target_CDF[j])
+
+    Step 3 — Inverse nearest-CDF mapping (z = G^-1[T(r)]):
+        InvHist[i] = argmin_j |HistEq[i] - SpecEq[j]|
+        Ties broken by smallest j (matching lecture's strict '<' comparison).
+
+    Input:
+        img         : ImageMatrix — any color mode; converted to grayscale.
+        target_prob : np.ndarray shape (256,) — Pz(z), the normalized target
+                      histogram. Must satisfy:
+                        - shape == (256,)
+                        - all values finite
+                        - all values >= 0
+                        - sum approximately 1.0 (tolerance 1e-6)
+                      Passing a non-normalized distribution raises ValueError.
+                      The engine does NOT silently normalize.
+
+    Output: np.ndarray shape (256,) dtype uint8
+            LUT[i] = output intensity for source intensity i.
+
+    Raises ValueError for invalid target_prob.
+    """
+    # --- Validate target_prob ---
+    target_prob = np.asarray(target_prob, dtype=np.float64)
+    if target_prob.shape != (256,):
+        raise ValueError(
+            f"target_prob must have shape (256,), got {target_prob.shape}"
+        )
+    if not np.all(np.isfinite(target_prob)):
+        raise ValueError("target_prob contains NaN or Inf values.")
+    if np.any(target_prob < 0.0):
+        raise ValueError("target_prob contains negative values.")
+    prob_sum = float(target_prob.sum())
+    if prob_sum == 0.0:
+        raise ValueError("target_prob is all-zero (no valid distribution).")
+    if abs(prob_sum - 1.0) > 1e-6:
+        raise ValueError(
+            f"target_prob must be normalized (sum ≈ 1.0), got sum={prob_sum:.8f}. "
+            "Normalize before calling this function."
+        )
+
+    # --- Step 1: equalize source (reuse existing CDF infrastructure) ---
+    hist_eq = np.floor(255.0 * _grayscale_cdf(img)).astype(np.int32)
+
+    # --- Step 2: equalize target ---
+    cdf_tgt = np.cumsum(target_prob)                       # float64 (256,)
+    spec_eq = np.floor(255.0 * cdf_tgt).astype(np.int32)  # int32
+
+    # --- Step 3: inverse nearest-CDF mapping ---
+    # diff[i, j] = |HistEq[i] - SpecEq[j]|  shape (256, 256) int32
+    diff = np.abs(hist_eq[:, np.newaxis] - spec_eq[np.newaxis, :])
+    # argmin along axis=1 returns smallest j on tie (np.argmin is left-biased)
+    inv_hist = np.argmin(diff, axis=1).astype(np.uint8)    # shape (256,) uint8
+
+    return inv_hist
+
+
+def histogram_specification(img: ImageMatrix, target_prob: np.ndarray) -> ImageMatrix:
+    """
+    Applies histogram specification (matching) to the image.
+
+    Converts any input to grayscale, applies the specification LUT
+    (see histogram_specification_lut), and returns a new GRAYSCALE ImageMatrix.
+
+    Output color_mode is always "GRAYSCALE".
+    """
+    lut = histogram_specification_lut(img, target_prob)
+    gray = img.to_grayscale_array()
+    result = lut[gray]
+    return ImageMatrix(result, color_mode="GRAYSCALE")

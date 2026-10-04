@@ -7,7 +7,7 @@
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
 [![NumPy](https://img.shields.io/badge/Matrix_Engine-NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white)](https://numpy.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(12%2F12)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-Passing%20(14%2F14)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
 
 *Aplikasi desktop pengolahan citra digital modern dengan antarmuka gelap profesional (Adobe Photoshop-style UX), mendukung live preview, multi-tab document, split-screen before/after comparison, histogram real-time, serta parser/writer mandiri untuk format citra standar dan biner mentah (RAW).*
 
@@ -89,7 +89,21 @@
   - *Sharpness Estimation*: Varians operator Laplacian ($\nabla^2 f$).
   - *Noise Level Estimation*: Algoritma estimasi derau berbasis Immerkaer.
 
-### 6. 🖥️ Photoshop-Grade User Experience (UX)
+### 6. 🎛️ Pemrosesan Histogram (Materi P10)
+- **Histogram Equalization** (Pemerataan Histogram):
+  - Transformasi citra global tanpa parameter menggunakan LUT berbasis CDF.
+  - Formula: $\text{LUT}[i] = \lfloor 255 \times \text{CDF}(i) \rfloor$, lalu output $= \text{LUT}[\text{input}]$.
+  - Input RGB dikonversi otomatis ke grayscale (NTSC luminance). Output selalu `GRAYSCALE`.
+  - Tersedia langsung di menu **Image → Histogram Equalization** (tanpa dialog/parameter).
+- **Histogram Specification / Matching** (Pencocokan Histogram):
+  - Memetakan histogram citra sumber ke distribusi target yang ditentukan pengguna.
+  - Algoritma tiga langkah (sesuai materi kuliah): equalize source → equalize target → inverse nearest-CDF matching ($\text{LUT}[i] = \arg\min_j |\text{HistEq}[i] - \text{SpecEq}[j]|$, tie-breaking pilih $j$ terkecil).
+  - Target histogram yang tersedia:
+    - **Uniform**: distribusi datar $\frac{1}{256}$ per bin (pilihan desain UI, bukan mandat kuliah).
+    - **From Image**: histogram grayscale dari citra referensi yang dipilih pengguna (citra referensi tidak masuk ke riwayat dokumen).
+  - Output selalu `GRAYSCALE`. Tersedia di menu **Image → Histogram Specification...** dengan live preview dan tombol Apply/Cancel.
+
+### 7. 🖥️ Photoshop-Grade User Experience (UX)
 - **Photoshop Dark UI**: Desain antarmuka gelap modern, elegan, dan ramah untuk penggunaan jangka panjang.
 - **Multi-Tab Document Workspace**: Kemampuan membuka dan menyunting banyak citra sekaligus.
 - **Interactive Canvas Engine**: Panning halus (klik-seret kursor) dan zooming berbasis titik kursor (*mouse wheel zoom*).
@@ -151,6 +165,8 @@ pytest
 | **Rata-rata Citra (Mean $\mu$)** | $\mu = \frac{1}{N}\sum_{x,y} f(x,y) = \sum_{i=0}^{255} i \cdot h(i)$ |
 | **Varians Citra ($\sigma^2$)** | $\sigma^2 = \frac{1}{N}\sum_{x,y} (f(x,y) - \mu)^2 = \sum_{i=0}^{255} (i - \mu)^2 \cdot h(i)$ |
 | **Standar Deviasi ($\sigma$)** | $\sigma = \sqrt{\sigma^2}$ |
+| **Histogram Equalization LUT** | $\text{LUT}[i] = \lfloor 255 \times \text{CDF}(i) \rfloor$ |
+| **Histogram Specification LUT** | $\text{LUT}[i] = \arg\min_j \left\lvert \lfloor 255 \cdot \text{CDF}_\text{src}(i) \rfloor - \lfloor 255 \cdot \text{CDF}_\text{tgt}(j) \rfloor \right\rvert$ |
 
 ---
 
@@ -172,7 +188,7 @@ mini_photoshop_project/
 │   │   ├── arithmetic_ops.py   # Operasi aritmetika 2 citra & alpha blend
 │   │   ├── boolean_ops.py      # Operasi logika bitwise (AND, OR, NOT, XOR, Mask)
 │   │   ├── geometry_ops.py     # Transformasi geometri (Translasi, Rotasi, Scaling, Flip)
-│   │   └── metrics.py          # Kalkulasi histogram (Normal, Normalized, CDF), statistik, & metrik kualitas
+│   │   └── metrics.py          # Kalkulasi histogram (Normal, Normalized, CDF), equalization, specification, statistik, & metrik kualitas
 │   │
 │   ├── ui/                     # Komponen antarmuka pengguna (PyQt6)
 │   │   ├── main_window.py      # Jendela utama, Menu bar, Toolbar, Tab manager
@@ -189,7 +205,7 @@ mini_photoshop_project/
 │   └── samples/                # Koleksi citra uji benchmark bawaan
 │
 └── tests/
-    └── test_engine.py          # Unit & integration tests otomatis (12 tes)
+    └── test_engine.py          # Unit & integration tests otomatis (14 tes)
 ```
 
 ---

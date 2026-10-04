@@ -6,9 +6,11 @@ Gray-Level Slicing, and Bit-Plane Slicing.
 """
 
 from typing import Callable, Optional
+import numpy as np
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
-    QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QComboBox
+    QPushButton, QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QComboBox,
+    QFileDialog, QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ...engine.core import ImageMatrix
@@ -17,6 +19,8 @@ from ...engine.point_ops import (
     threshold_otsu, compute_otsu_threshold, gamma_correction, posterize,
     log_transform, inverse_log_transform, gray_level_slicing, bit_plane_slice,
 )
+from ...engine.metrics import histogram_specification
+from ...engine.io_custom import load_image_file
 
 
 class BaseLivePreviewDialog(QDialog):
@@ -411,6 +415,109 @@ class BitPlaneSlicingDialog(BaseLivePreviewDialog):
         bit = self.bit_slider.value()
         try:
             res = bit_plane_slice(self.original_img, bit)
+        except ValueError:
+            return
+        self.result_img = res
+        self.previewUpdated.emit(res)
+
+
+# =============================================================================
+# Histogram Specification Dialog (P10)
+# =============================================================================
+
+class HistogramSpecificationDialog(BaseLivePreviewDialog):
+    """
+    Histogram Specification (histogram matching) dialog.
+
+    Allows the user to choose a target histogram shape and apply it to the
+    source image via histogram_specification().
+
+    Target histogram options:
+      - Uniform: flat distribution, 1/256 per bin (equivalent to equalization)
+      - From Image: derive target from a reference image loaded from disk
+
+    The source image remains the current document. The reference image is
+    only used to compute Spec[256]; it never becomes the active document.
+    """
+
+    def __init__(self, original_img: ImageMatrix, parent=None):
+        super().__init__(original_img, "Histogram Specification", parent)
+
+        # ── Target selection row ─────────────────────────────────────────────
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Target Histogram:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Uniform", "From Image..."])
+        mode_row.addWidget(self.mode_combo)
+        self.content_layout.addLayout(mode_row)
+
+        # ── "Choose Image" button (shown only for From Image mode) ───────────
+        self.btn_choose = QPushButton("Choose Reference Image...")
+        self.btn_choose.setEnabled(False)
+        self.content_layout.addWidget(self.btn_choose)
+
+        # ── Status label ─────────────────────────────────────────────────────
+        self.lbl_status = QLabel("Target: Uniform distribution (1/256 per bin)")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setStyleSheet("color: #aaaaaa; font-size: 10px;")
+        self.content_layout.addWidget(self.lbl_status)
+
+        # Internal state
+        self._target_prob: np.ndarray = np.full(256, 1.0 / 256.0)
+
+        # ── Wire signals ─────────────────────────────────────────────────────
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.btn_choose.clicked.connect(self._on_choose_image)
+
+        # Trigger initial preview
+        self._recalculate()
+
+    # ── Slots ─────────────────────────────────────────────────────────────────
+
+    def _on_mode_changed(self, index: int):
+        is_from_image = (index == 1)
+        self.btn_choose.setEnabled(is_from_image)
+        if index == 0:
+            self._target_prob = np.full(256, 1.0 / 256.0)
+            self.lbl_status.setText("Target: Uniform distribution (1/256 per bin)")
+            self._recalculate()
+        # For From Image mode: wait for user to choose a file.
+
+    def _on_choose_image(self):
+        filter_str = (
+            "All Supported Images (*.png *.jpg *.jpeg *.bmp *.pbm *.pgm *.ppm *.raw *.tif *.tiff);;"
+            "All Files (*.*)"
+        )
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Choose Reference Image for Target Histogram", "", filter_str
+        )
+        if not filepath:
+            return  # user cancelled — keep existing target
+
+        try:
+            ref_img = load_image_file(filepath)
+        except Exception as exc:
+            QMessageBox.critical(self, "Load Error", f"Cannot load reference image:\n{exc}")
+            return
+
+        # Convert reference to grayscale, build normalized 256-bin histogram
+        gray = ref_img.to_grayscale_array()
+        raw, _ = np.histogram(gray.ravel(), bins=256, range=(0, 256))
+        n = float(gray.size)
+        target_prob = raw.astype(np.float64) / n  # normalized, sum=1.0
+
+        import os
+        basename = os.path.basename(filepath)
+        self.lbl_status.setText(
+            f"Target: {basename}  ({ref_img.width}×{ref_img.height} px, "
+            f"converted to grayscale)"
+        )
+        self._target_prob = target_prob
+        self._recalculate()
+
+    def _recalculate(self):
+        try:
+            res = histogram_specification(self.original_img, self._target_prob)
         except ValueError:
             return
         self.result_img = res

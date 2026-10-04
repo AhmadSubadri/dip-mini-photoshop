@@ -5,6 +5,7 @@ from .adjust_dialog import (
     BrightnessContrastDialog, ThresholdDialog, GammaDialog, PosterizeDialog,
     LogTransformDialog, InverseLogTransformDialog,
     GrayLevelSlicingDialog, BitPlaneSlicingDialog,
+    HistogramSpecificationDialog,
 )
 from .arithmetic_dialog import ArithmeticOperationDialog
 from .geometry_dialog import RotateDialog, TranslateDialog, ScaleDialog
@@ -20,6 +21,7 @@ __all__ = [
     "InverseLogTransformDialog",
     "GrayLevelSlicingDialog",
     "BitPlaneSlicingDialog",
+    "HistogramSpecificationDialog",
     "ArithmeticOperationDialog",
     "RotateDialog",
     "TranslateDialog",
