@@ -7,7 +7,7 @@
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
 [![NumPy](https://img.shields.io/badge/Matrix_Engine-NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white)](https://numpy.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(11%2F11)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-Passing%20(12%2F12)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
 
 *Aplikasi desktop pengolahan citra digital modern dengan antarmuka gelap profesional (Adobe Photoshop-style UX), mendukung live preview, multi-tab document, split-screen before/after comparison, histogram real-time, serta parser/writer mandiri untuk format citra standar dan biner mentah (RAW).*
 
@@ -52,6 +52,10 @@
   - *Otsu Thresholding*: Binerisasi otomatis berbasis maksimasi varians antar kelas (*inter-class variance*).
 - **Koreksi Gamma (Power-Law Transformation)**: Transformasi kurva pencahayaan non-linear.
 - **Posterisasi & Solarize**: Kuantisasi kedalaman bit $(1, 2, 4, 8\text{ bit})$ dan efek solarisasi artistik.
+- **Transformasi Log**: Memperluas rentang intensitas gelap menggunakan $s = c \cdot \ln(1 + r)$.
+- **Transformasi Inverse Log**: Memperluas intensitas terang menggunakan $s = 256^{r/255} - 1$.
+- **Gray-Level Slicing**: Menonjolkan rentang intensitas tertentu dengan mode *preserve* atau *suppress background*.
+- **Bit-Plane Slicing**: Mengekstrak satu bidang bit (0–7) dari representasi 8-bit, menghasilkan citra biner 0/255.
 
 ### 3. ➕ Operasi Aritmetika & Logika Citra
 - **Aritmetika Dua Citra**:
@@ -134,6 +138,10 @@ pytest
 | **Penyesuaian Kontras** | $f'(x, y) = \text{clip}\left(128 + c \cdot (f(x, y) - 128), 0, 255\right)$ |
 | **Contrast Stretching** | $f'(x, y) = \frac{f(x, y) - f_{\min}}{f_{\max} - f_{\min}} \times 255$ |
 | **Koreksi Gamma** | $s = 255 \times \left(\frac{r}{255}\right)^\gamma$ |
+| **Transformasi Log** | $s = c \cdot \ln(1 + r), \quad c > 0$ |
+| **Transformasi Inverse Log** | $s = 256^{r/255} - 1$ |
+| **Gray-Level Slicing** | $s = 255$ jika $r_{\text{low}} < r < r_{\text{high}}$, selain itu $s = r$ (preserve) atau $s = 0$ (suppress) |
+| **Bit-Plane Slicing** | $s = \left(\lfloor r / 2^n \rfloor \bmod 2\right) \times 255, \quad n \in [0, 7]$ |
 | **Ambang Batas Otsu** | $\sigma_B^2(t) = \omega_0(t)\omega_1(t)\left[\mu_0(t) - \mu_1(t)\right]^2 \rightarrow \max$ |
 | **Alpha Blending** | $C(x, y) = \alpha \cdot A(x, y) + (1 - \alpha) \cdot B(x, y)$ |
 | **Rotasi Matriks** | $\begin{bmatrix} x' \\ y' \end{bmatrix} = \begin{bmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{bmatrix} \begin{bmatrix} x - x_c \\ y - y_c \end{bmatrix} + \begin{bmatrix} x_c \\ y_c \end{bmatrix}$ |
@@ -181,7 +189,7 @@ mini_photoshop_project/
 │   └── samples/                # Koleksi citra uji benchmark bawaan
 │
 └── tests/
-    └── test_engine.py          # Unit & integration tests otomatis (11 tes)
+    └── test_engine.py          # Unit & integration tests otomatis (12 tes)
 ```
 
 ---
