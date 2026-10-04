@@ -27,7 +27,7 @@ from ..engine.boolean_ops import bitwise_not
 from ..engine.geometry_ops import (
     rotate_orthogonal, flip_horizontal, flip_vertical
 )
-from ..engine.metrics import compute_statistics
+from ..engine.metrics import compute_statistics, histogram_equalization
 from .canvas import ImageCanvas
 from .histogram_widget import HistogramWidget
 from .dialogs import (
@@ -36,6 +36,7 @@ from .dialogs import (
     TranslateDialog, ScaleDialog, ImageInfoDialog, RawImportDialog,
     LogTransformDialog, InverseLogTransformDialog,
     GrayLevelSlicingDialog, BitPlaneSlicingDialog,
+    HistogramSpecificationDialog,
 )
 from .styles import PHOTOSHOP_DARK_THEME
 
@@ -288,6 +289,16 @@ class MainWindow(QMainWindow):
         act_bps = QAction("&Bit-Plane Slicing...", self)
         act_bps.triggered.connect(self.action_bit_plane_slicing)
         image_menu.addAction(act_bps)
+
+        image_menu.addSeparator()
+
+        act_histeq = QAction("Histogram &Equalization", self)
+        act_histeq.triggered.connect(self.action_histogram_equalization)
+        image_menu.addAction(act_histeq)
+
+        act_histspec = QAction("Histogram &Specification...", self)
+        act_histspec.triggered.connect(self.action_histogram_specification)
+        image_menu.addAction(act_histspec)
 
         # 5. ADJUSTMENTS MENU
         adj_menu = mb.addMenu("&Adjustments")
@@ -710,6 +721,12 @@ class MainWindow(QMainWindow):
 
     def action_bit_plane_slicing(self):
         self._run_preview_dialog(BitPlaneSlicingDialog, "Bit-Plane Slicing")
+
+    def action_histogram_equalization(self):
+        self._apply_quick_point_op("Histogram Equalization", histogram_equalization)
+
+    def action_histogram_specification(self):
+        self._run_preview_dialog(HistogramSpecificationDialog, "Histogram Specification")
 
     # ==========================================================================
     # Interactive Modals with Live Preview
