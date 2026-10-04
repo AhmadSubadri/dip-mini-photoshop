@@ -45,7 +45,7 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 │ ENGINE LAYER (Pure NumPy & Matrix Math)                                         │
 │  - core.py          : ImageMatrix (Wrapper np.ndarray uint8) + DocumentState    │
 │  - io_custom.py     : Parser & Writer Biner/ASCII (PBM, PGM, PPM, BMP, RAW)     │
-│  - point_ops.py     : Invert, Grayscale, Brightness, Contrast, Otsu, Gamma      │
+│  - point_ops.py     : Invert, Grayscale, Brightness, Contrast, Otsu, Gamma, Log, Slicing │
 │  - arithmetic_ops.py: Add, Subtract, Multiply, Divide, Alpha Blend              │
 │  - boolean_ops.py   : AND, OR, NOT, XOR, Masking                                │
 │  - geometry_ops.py  : Translate, Rotate, Flip, Scale, Crop                      │
@@ -132,6 +132,34 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 * **Solarisasi (Solarize Effect)**:
   * Rentang Ambang: $[0, 255]$ (Nilai awal: `128`).
   * Aturan: $f(x,y) > T \implies 255 - f(x,y)$, selain itu tetap $f(x,y)$.
+
+---
+
+### 3b. Parameter Image Enhancement (Materi P9 - `point_ops.py`)
+* **Transformasi Log (`log_transform`)**:
+  * Formula: $s = c \cdot \ln(1 + r)$, dengan $r \in [0, 255]$ (nilai piksel mentah 8-bit).
+  * Parameter $c$: konstanta positif, $c > 0$. Nilai awal default `c = 1.0`.
+  * Nilai $c$ auto-scale: $c = \frac{255}{\ln(256)} \approx 45.99$ — memetakan rentang penuh $[0, 255]$ ke $[0, 255]$.
+  * Kalkulasi: float64, hasil di-*clip* ke $[0, 255]$ dan dikonversi `np.uint8`.
+  * Validasi: `c <= 0` memunculkan `ValueError`.
+* **Transformasi Inverse Log (`inverse_log_transform`)**:
+  * Formula: $s = 256^{r/255} - 1$.
+  * Pemetaan tepat: $r = 0 \implies s = 0$; $r = 255 \implies s = 255$.
+  * Tidak ada parameter tambahan. Kurva eksponensial — kebalikan visual dari kurva log.
+  * Catatan: formula ini merupakan interpretasi dari materi kuliah (slide P9 hal. 22 & 25) yang hanya menyatakan "kebalikannya" tanpa menuliskan persamaan eksplisit.
+* **Gray-Level Slicing (`gray_level_slicing`)**:
+  * Parameter: `lower` (int, $[0, 254]$), `upper` (int, $[1, 255]$), `preserve_background` (bool).
+  * Mask: `(pixel > lower) & (pixel < upper)` — **pertidaksamaan ketat** sesuai contoh MATLAB di materi kuliah.
+  * Mode *Preserve Background* (Pendekatan 2 kuliah): piksel dalam rentang → 255; luar rentang → nilai asli.
+  * Mode *Suppress Background* (Pendekatan 1 kuliah): piksel dalam rentang → 255; luar rentang → 0.
+  * Output: selalu `ImageMatrix` ber-`color_mode="GRAYSCALE"` (input dikonversi grayscale).
+  * Validasi: `lower >= upper` atau nilai di luar $[0, 255]$ memunculkan `ValueError`.
+* **Bit-Plane Slicing (`bit_plane_slice`)**:
+  * Parameter: `bit` (int, $[0, 7]$).
+  * Penomoran bit mengikuti materi kuliah (slide P9 hal. 56): `b7 b6 b5 b4 b3 b2 b1 b0` — `bit 0` = LSB, `bit 7` = MSB.
+  * Ekstraksi: `((gray >> bit) & 1) * 255`.
+  * Output: `ImageMatrix` ber-`color_mode="GRAYSCALE"` berisi hanya nilai 0 dan 255.
+  * Validasi: `bit` di luar $[0, 7]$ memunculkan `ValueError`.
 
 ---
 
@@ -250,7 +278,7 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 ---
 
 #### 📄 `mini_photoshop/engine/point_ops.py`
-* **Tujuan**: Operasi aras titik di mana nilai piksel baru dihitung secara independen dari piksel sekitarnya (Materi P6).
+* **Tujuan**: Operasi aras titik di mana nilai piksel baru dihitung secara independen dari piksel sekitarnya (Materi P6 & P9).
 * **Fungsi**:
   * `invert(img)`: Citra negatif, $f'(x, y) = 255 - f(x, y)$.
   * `to_grayscale_average(img)`: Konversi grayscale metode rata-rata: $(R+G+B)/3$.
@@ -264,6 +292,10 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
   * `gamma_correction(img, gamma)`: Transformasi daya (*Power-Law*): $s = c \cdot r^\gamma$.
   * `posterize(img, bits)`: Penurunan kedalaman bit warna (kuantisasi tingkat keabuan).
   * `solarize(img, threshold)`: Efek solarisasi (membalikkan hanya piksel yang di atas nilai ambang tertentu).
+  * `log_transform(img, c)`: **[P9]** Transformasi log: $s = c \cdot \ln(1 + r)$. Parameter $c > 0$.
+  * `inverse_log_transform(img)`: **[P9]** Transformasi inverse log: $s = 256^{r/255} - 1$. Memetakan $[0,255] \to [0,255]$ secara tepat.
+  * `gray_level_slicing(img, lower, upper, preserve_background)`: **[P9]** Menonjolkan rentang intensitas $(r > \text{lower})\ \&\ (r < \text{upper})$ dengan dua mode (preserve/suppress background).
+  * `bit_plane_slice(img, bit)`: **[P9]** Mengekstrak satu bidang bit (`bit` 0–7, LSB–MSB) sebagai citra biner 0/255.
 
 ---
 
