@@ -19,8 +19,6 @@ Dokumen ini ditujukan sebagai panduan komprehensif bagi anggota tim pengembang u
    - [4. Menambahkan Unit Test](#4-menambahkan-unit-test)
 5. [Konvensi & Standar Kode Tim](#-konvensi--standar-kode-tim)
 
----
-
 ## 🏛️ Arsitektur Sistem & Aliran Data
 
 Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahkan logika matematika citra dari tampilan:
@@ -49,7 +47,7 @@ Aplikasi ini menggunakan pola **Decoupled Engine-UI Architecture** yang memisahk
 │  - arithmetic_ops.py: Add, Subtract, Multiply, Divide, Alpha Blend              │
 │  - boolean_ops.py   : AND, OR, NOT, XOR, Masking                                │
 │  - geometry_ops.py  : Translate, Rotate, Flip, Scale, Crop                      │
-│  - metrics.py       : Histogram (Raw, Normalized, CDF), Mean, Var, Sharp, Noise │
+│  - metrics.py       : Histogram (Raw, Normalized, CDF), Equalization, Specification, Mean, Var, Sharp, Noise │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -160,6 +158,57 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
   * Ekstraksi: `((gray >> bit) & 1) * 255`.
   * Output: `ImageMatrix` ber-`color_mode="GRAYSCALE"` berisi hanya nilai 0 dan 255.
   * Validasi: `bit` di luar $[0, 7]$ memunculkan `ValueError`.
+
+---
+
+### 3c. Parameter Pemrosesan Histogram (Materi P10 - `metrics.py`)
+
+> **Catatan akademik**: Algoritma Histogram Equalization dan Histogram Specification berasal langsung dari pseudocode C di materi kuliah (slide P10). Target distribusi *Uniform* dan *From Image* pada dialog UI adalah **pilihan desain implementasi** untuk menyediakan `Spec[256]` kepada engine — bukan persyaratan yang secara eksplisit dideskripsikan di materi kuliah.
+
+* **Scope Grayscale**:
+  * Histogram Equalization dan Histogram Specification **hanya beroperasi pada data grayscale**.
+  * Input RGB/RGBA dikonversi ke grayscale menggunakan bobot NTSC luminance (`to_grayscale_array()`) sebelum diproses.
+  * Output kedua transformasi ini selalu `color_mode="GRAYSCALE"`.
+  * Equalisasi per-kanal RGB tidak diimplementasikan.
+
+* **`_grayscale_cdf(img)` (helper internal)**:
+  * Mengembalikan CDF grayscale sebagai array `float64` shape `(256,)`.
+  * Reuse infrastruktur `compute_cumulative_histograms()` yang sudah ada; memilih kunci `"Gray"` untuk citra grayscale/biner, dan `"Luminance"` untuk citra RGB/RGBA.
+  * Digunakan oleh `histogram_equalization_lut` dan `histogram_specification_lut` agar tidak ada duplikasi komputasi histogram.
+
+* **`histogram_equalization_lut(img)` — LUT Pemerataan Histogram**:
+  * Formula (sesuai pseudocode C slide P10 hal. 32):
+    $$\text{LUT}[i] = \lfloor 255 \times \text{CDF}(i) \rfloor$$
+    di mana $\text{CDF}(i) = \sum_{k=0}^{i} h(k)$ dan $h(k) = n(k) / N$.
+  * Output: `np.ndarray` shape `(256,)` dtype `uint8`, monoton tidak menurun, nilai $\in [0, 255]$.
+  * LUT[255] selalu bernilai 255 (CDF akhir = 1.0 → $\lfloor 255 \times 1.0 \rfloor = 255$).
+
+* **`histogram_specification_lut(img, target_prob)` — LUT Pencocokan Histogram**:
+  * **Algoritma tiga langkah** (sesuai slide P10 hal. 38–39, 48–49):
+
+    **Langkah 1 — Equalisasi source:**
+    $$\text{HistEq}[i] = \lfloor 255 \times \text{CDF}_\text{src}(i) \rfloor$$
+
+    **Langkah 2 — Equalisasi target:**
+    $$\text{SpecEq}[j] = \lfloor 255 \times \text{CDF}_\text{tgt}(j) \rfloor$$
+    di mana $\text{CDF}_\text{tgt}(j) = \sum_{k=0}^{j} \text{target\_prob}[k]$.
+
+    **Langkah 3 — Inverse nearest-CDF mapping:**
+    $$\text{LUT}[i] = \arg\min_j \left\lvert \text{HistEq}[i] - \text{SpecEq}[j] \right\rvert$$
+    Tie-breaking: pilih $j$ terkecil (sesuai sifat left-biased `np.argmin` dan perbandingan `<` di pseudocode kuliah).
+
+  * **Validasi `target_prob` (ketat, tidak ada normalisasi diam-diam)**:
+    * Shape harus tepat `(256,)` — selain itu `ValueError`.
+    * Tidak boleh mengandung `NaN` atau `Inf` — `ValueError`.
+    * Semua nilai harus $\ge 0$ — `ValueError`.
+    * Sum harus $\approx 1.0$ (toleransi $10^{-6}$) — `ValueError` jika tidak terpenuhi.
+    * Array nol semua — `ValueError`.
+  * Output: `np.ndarray` shape `(256,)` dtype `uint8`.
+
+* **Verifikasi Golden Lecture (Test I)**:
+  * Menggunakan distribusi L=8 dari slide P10 hal. 42–47 (4096 piksel, intensitas 0–7).
+  * Target Pz dari tabel CDF di slide P10 hal. 45: `[0, 0, 0, 0.15, 0.20, 0.30, 0.20, 0.15]` pada bin 0–7.
+  * Production engine dengan `floor(255*CDF)` di 256-level space menghasilkan mapping yang **identik** dengan hasil lecture: $r_0\to z_3,\ r_1\to z_4,\ r_2\to z_5,\ r_3\to z_6,\ r_4\to z_6,\ r_5\to z_7,\ r_6\to z_7,\ r_7\to z_7$.
 
 ---
 
@@ -336,7 +385,7 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 ---
 
 #### 📄 `mini_photoshop/engine/metrics.py`
-* **Tujuan**: Kalkulasi analisis sebaran data statistik, histogram (Normal, Ternormalisasi, Kumulatif), dan metrik kualitas citra (Materi P1–P3 & Materi Histogram Citra).
+* **Tujuan**: Kalkulasi analisis sebaran data statistik, histogram (Normal, Ternormalisasi, Kumulatif), pemerataan histogram, pencocokan histogram, dan metrik kualitas citra (Materi P1–P3, Materi Histogram Citra, & Materi P10).
 * **Fungsi**:
   * `compute_histograms(img)`:
     * Menghitung histogram normal (*raw pixel counts*) dengan 256 bin ($[0, 255]$).
@@ -359,6 +408,26 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
       * `sharpness_laplacian`: Estimasi ketajaman berbasis varians konvolusi Laplacian $\nabla^2$.
       * `noise_estimate`: Estimasi level derau menggunakan kernel konvolusi Immerkaer.
       * Metadata pendukung: `total_pixels`, `dimensions`, `channels`, `color_mode`, `bit_depth`, `memory_size_kb`.
+  * `_grayscale_cdf(img)` *(private helper)*:
+    * Mengembalikan CDF grayscale shape `(256,)` dtype `float64` dengan mereuse `compute_cumulative_histograms`.
+    * Memilih kunci `"Gray"` untuk grayscale/biner, `"Luminance"` untuk RGB/RGBA.
+    * Digunakan oleh kedua fungsi equalization/specification untuk menghindari duplikasi komputasi.
+  * `histogram_equalization_lut(img)`:
+    * Menghitung LUT pemerataan histogram 256-entry sesuai pseudocode kuliah (slide P10 hal. 32).
+    * Formula: $\text{LUT}[i] = \lfloor 255 \times \text{CDF}(i) \rfloor$.
+    * Input: `ImageMatrix` — mode apapun, dikonversi ke grayscale secara internal.
+    * Output: `np.ndarray` shape `(256,)` dtype `uint8`, monoton tidak menurun.
+  * `histogram_equalization(img)`:
+    * Menerapkan LUT dari `histogram_equalization_lut` ke citra menggunakan vectorized lookup.
+    * Input RGB dikonversi ke grayscale; output selalu `color_mode="GRAYSCALE"`.
+  * `histogram_specification_lut(img, target_prob)`:
+    * Menghitung LUT pencocokan histogram (histogram matching) 256-entry sesuai algoritma tiga langkah kuliah (slide P10 hal. 38–39, 48–49).
+    * Langkah: (1) equalisasi source via `_grayscale_cdf`, (2) equalisasi target via `np.cumsum(target_prob)`, (3) inverse nearest-CDF matching dengan `np.argmin` (tie-breaking: $j$ terkecil).
+    * Validasi `target_prob` ketat: shape `(256,)`, finite, non-negatif, sum $\approx 1.0 \pm 10^{-6}$ — `ValueError` jika tidak terpenuhi. Engine tidak menormalisasi secara diam-diam.
+    * Output: `np.ndarray` shape `(256,)` dtype `uint8`.
+  * `histogram_specification(img, target_prob)`:
+    * Menerapkan LUT dari `histogram_specification_lut` ke citra menggunakan vectorized lookup.
+    * Input RGB dikonversi ke grayscale; output selalu `color_mode="GRAYSCALE"`.
 
 ---
 
@@ -417,11 +486,27 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 ---
 
 #### 📁 `mini_photoshop/ui/dialogs/`
-* `adjust_dialog.py`: Dialog slider untuk operasi Brightness, Contrast, Threshold, Gamma, Posterize, dan Solarize lengkap dengan sinyal *live preview*.
+* `adjust_dialog.py`: Dialog slider untuk operasi Brightness, Contrast, Threshold, Gamma, Posterize, Solarize, Log Transform, Inverse Log Transform, Gray-Level Slicing, dan Bit-Plane Slicing, lengkap dengan sinyal *live preview*. Juga berisi `HistogramSpecificationDialog` untuk pencocokan histogram dengan target *Uniform* atau *From Image*.
 * `arithmetic_dialog.py`: Dialog pemilihan citra kedua dari tab aktif atau dari berkas komputer untuk operasi aljabar 2 citra dan operasi logika bitwise.
 * `geometry_dialog.py`: Dialog input parameter translasi, rotasi sudut bebas, dan penskalaan dimensi kanvas.
 * `info_dialog.py`: Dialog laporan metadata detail berkas, resolusi, color space, dan metrik kualitas citra.
 * `raw_dialog.py`: Dialog konfigurasi parameter dimensi, channels, dan header offset saat mengimpor citra biner mentah (*RAW*).
+
+Pola arsitektur dialog dengan live preview (`BaseLivePreviewDialog`):
+* Semua dialog yang menghasilkan live preview mewarisi `BaseLivePreviewDialog`.
+* Sinyal `previewUpdated = pyqtSignal(ImageMatrix)` dipancarkan setiap kali parameter berubah.
+* `_run_preview_dialog(DialogClass, action_name)` di `MainWindow` menangani seluruh wiring preview secara otomatis.
+* Untuk operasi tanpa parameter, digunakan pola `_apply_quick_point_op(action_name, fn)` (seperti Histogram Equalization dan Auto Otsu).
+
+**`HistogramSpecificationDialog`** (di `adjust_dialog.py`):
+* Mewarisi `BaseLivePreviewDialog`. Live preview aktif segera saat dialog dibuka.
+* Pilihan target histogram:
+  * **Uniform** (default): `np.full(256, 1.0/256)` — dibangun langsung di dialog.
+  * **From Image...**: Pengguna memilih berkas citra referensi via `QFileDialog`. Citra referensi dikonversi ke grayscale (`to_grayscale_array()`), histogram 256-bin dihitung dan dinormalisasi menjadi `target_prob` shape `(256,)`. Citra referensi **tidak** ditambahkan ke riwayat dokumen.
+* Status label menampilkan nama berkas dan dimensi citra referensi (atau "Uniform distribution" untuk mode Uniform).
+* Apply: mendorong `result_img` ke `doc.push_state`, memperbarui canvas dan histogram widget.
+* Cancel: mengembalikan citra sumber asli melalui mekanisme preview `BaseLivePreviewDialog`.
+* Output selalu `GRAYSCALE`; histogram widget otomatis beralih ke channel selector `"Luminance / Gray"`.
 
 ---
 
@@ -429,7 +514,7 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 
 #### 📄 `tests/test_engine.py`
 * **Tujuan**: Kumpulan pengujian otomatis (*Unit Testing*) berbasis `unittest` / `pytest` untuk memverifikasi keakuratan algoritma engine tanpa perlu membuka GUI.
-* **Daftar Tes (11 Kasus Uji)**:
+* **Daftar Tes (14 Kasus Uji)**:
   * `test_01_core_and_undo_redo`: Validasi objek `ImageMatrix` dan stack Undo/Redo.
   * `test_02_point_operations`: Validasi matematis rumus invert, grayscale, brightness, contrast, contrast stretching, Otsu, gamma, posterize, dan solarize.
   * `test_03_arithmetic_operations`: Validasi penjumlahan, pengurangan, perkalian, dan alpha blending citra.
@@ -441,6 +526,18 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
   * `test_09_normalized_histograms_grayscale_and_binary`: Validasi histogram ternormalisasi citra Grayscale dan Biner (memastikan citra biner 50/50 hanya memiliki tepat 2 bin aktif bernilai masing-masing $0.5$).
   * `test_10_cumulative_histograms_rgb`: Validasi histogram kumulatif (CDF) citra RGB (sifat monotonik tidak menurun $\Delta \ge 0$, rentang $[0.0, 1.0]$, dan bin terakhir $j=255$ bernilai $\approx 1.0$).
   * `test_11_cumulative_histograms_grayscale_and_binary`: Validasi CDF citra Grayscale dan Biner (memverifikasi pembentukan plateau konstan $0.5$ pada bin $1 \le j \le 254$ dan transisi ke $1.0$ pada bin $255$).
+  * `test_12_image_enhancement_operations`: Validasi operasi enhancement P9: Log Transform (formula, validasi `c≤0`), Inverse Log Transform (pemetaan tepat $0\to0$, $255\to255$), Gray-Level Slicing (mode preserve & suppress, pertidaksamaan ketat, output grayscale), dan Bit-Plane Slicing (binary output, rentang bit 0–7, validasi bit invalid).
+  * `test_13_histogram_equalization`: Validasi `histogram_equalization_lut` dan `histogram_equalization` (Tests A–D):
+    * **A**: Verifikasi formula `floor(255*CDF)` pada citra 2-piksel `[0, 255]`.
+    * **B**: Properti LUT — shape `(256,)`, dtype `uint8`, monoton tidak menurun, LUT[255]=255.
+    * **C**: Input RGB dikonversi otomatis ke `GRAYSCALE`.
+    * **D**: Contoh terkontrol 4-piksel `[0, 100, 100, 200]` dengan verifikasi manual seluruh nilai LUT dan output piksel.
+  * `test_14_histogram_specification`: Validasi `histogram_specification_lut` dan `histogram_specification` (Tests E–I):
+    * **E**: Validasi rejection — shape salah, nilai negatif, NaN, Inf, all-zero, sum≠1.0 → semua raise `ValueError`.
+    * **F**: Nearest-CDF mapping correctness; tie-breaking (smallest j wins) diverifikasi dengan target patologis.
+    * **G**: Output selalu `GRAYSCALE`; input RGB menghasilkan output single-channel grayscale.
+    * **H**: Spesifikasi dengan target uniform menghasilkan LUT identik dengan equalization (kedua menggunakan `floor(255*CDF)` dan nearest-match menjadi identity).
+    * **I**: **Golden lecture test** — membangun citra sintetis 4096 piksel dari distribusi L=8 slide P10 hal. 42, target Pz dari tabel CDF slide P10 hal. 45, dan memverifikasi bahwa production engine menghasilkan mapping $r_0\to z_3,\ r_1\to z_4,\ r_2\to z_5,\ r_3\to z_6,\ r_4\to z_6,\ r_5\to z_7,\ r_6\to z_7,\ r_7\to z_7$ sesuai slide P10 hal. 46 secara end-to-end.
 
 ---
 
