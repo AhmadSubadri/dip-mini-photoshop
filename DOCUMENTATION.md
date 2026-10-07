@@ -428,6 +428,54 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
   * `histogram_specification(img, target_prob)`:
     * Menerapkan LUT dari `histogram_specification_lut` ke citra menggunakan vectorized lookup.
     * Input RGB dikonversi ke grayscale; output selalu `color_mode="GRAYSCALE"`.
+  * `compute_mse(img1, img2)`:
+    * Menghitung nilai Mean Squared Error (MSE) secara manual: $\frac{1}{N} \sum (I_1 - I_2)^2$.
+  * `compute_psnr(img1, img2, max_pixel_val=255.0)`:
+    * Menghitung nilai Peak Signal-to-Noise Ratio (PSNR) dalam desibel (dB): $10 \log_{10}(255^2 / \text{MSE})$.
+
+---
+
+#### 📄 `mini_photoshop/engine/spatial_ops.py`
+* **Tujuan**: Operasi Spasial Lokal / Neighborhood Filtering (Linier Konvolusi dan Non-Linier Rank-Order) 100% manual from scratch tanpa library OpenCV/SciPy.
+* **Fungsi Utama**:
+  * `manual_pad2d(channel, pad_top, pad_bottom, pad_left, pad_right, mode="replicate")`:
+    * Menambahkan bingkai piksel manual pada matriks 2D dengan pilihan mode `'replicate'`, `'zero'`, atau `'reflect'`.
+  * `convolve2d_manual(channel, kernel, pad_mode="replicate")`:
+    * Komputasi konvolusi 2D / cross-correlation manual dengan sliding window: $g(y,x) = \sum\sum f(y+i, x+j) \cdot K(i,j)$.
+  * `apply_kernel_to_image(img, kernel, clip_output=True)`:
+    * Menerapkan konvolusi ke seluruh kanal citra (Grayscale maupun RGB).
+  * `apply_mean_filter(img, kernel_size=3)`:
+    * Filter perataan/blur linier dengan bobot seragam $\frac{1}{K^2}$ (mendukung $2\times 2$, $3\times 3$, $5\times 5$, dst.).
+  * `apply_gaussian_filter(img, kernel_size=3, sigma=1.0)`:
+    * Filter Gauss linier dengan pembobotan matematis normal $G(y,x) = \frac{1}{2\pi\sigma^2} e^{-\frac{x^2+y^2}{2\sigma^2}}$ dinormalisasi $\sum K = 1$.
+  * `apply_sharpen_filter(img, mode="standard" | "strong")`:
+    * Penajaman citra berbasis kernel High-Pass Laplacian 4-tetangga atau 8-tetangga.
+  * `apply_edge_roberts(img)`:
+    * Deteksi tepi gradien silang Roberts Cross dengan matriks kernel $2\times 2$: $G = \sqrt{G_x^2 + G_y^2}$.
+  * `apply_edge_sobel(img)`:
+    * Deteksi tepi gradien Sobel dengan matriks kernel $3\times 3$: $G = \sqrt{G_x^2 + G_y^2}$.
+  * `rank_order_filter2d_manual(channel, kernel_size, operation="median"|"max"|"min")`:
+    * Operasi non-linier statistik urutan dengan sliding window manual.
+  * `apply_median_filter(img, kernel_size=3)`:
+    * Mengurutkan nilai piksel dalam jendela lokal dan mengambil nilai tengah. Sangat efektif untuk menghilangkan derau *salt-and-pepper*.
+  * `apply_max_filter(img, kernel_size=3)`:
+    * Mengambil nilai piksel maksimum dalam jendela lokal.
+  * `apply_min_filter(img, kernel_size=3)`:
+    * Mengambil nilai piksel minimum dalam jendela lokal.
+
+---
+
+#### 📄 `mini_photoshop/engine/noise_ops.py`
+* **Tujuan**: Pembangkitan derau (noise generator) dan evaluasi restorasi citra manual.
+* **Fungsi Utama**:
+  * `add_salt_and_pepper_noise(img, amount=0.05, salt_ratio=0.5, seed=None)`:
+    * Pembangkitan derau impulsif manual dengan mengacak koordinat piksel menjadi 255 (Salt) atau 0 (Pepper).
+  * `add_gaussian_noise(img, mean=0.0, sigma=25.0, seed=None)`:
+    * Pembangkitan derau aditif normal Gauss $f_{\text{noisy}} = \text{clip}(f + N(\mu, \sigma^2), 0, 255)$.
+  * `add_speckle_noise(img, variance=0.04, seed=None)`:
+    * Pembangkitan derau multiplikatif $f_{\text{noisy}} = \text{clip}(f + f \cdot N(0, \text{Var}), 0, 255)$.
+  * `evaluate_restoration(original, noisy, restored)`:
+    * Evaluasi kualitas restorasi citra secara kuantitatif dengan menghitung MSE & PSNR kondisi sebelum vs sesudah, serta peningkatan delta $\Delta\text{PSNR}$ (+dB).
 
 ---
 
@@ -491,6 +539,8 @@ Bagian ini merangkum seluruh **angka konstanta, batasan (range), konvensi repres
 * `geometry_dialog.py`: Dialog input parameter translasi, rotasi sudut bebas, dan penskalaan dimensi kanvas.
 * `info_dialog.py`: Dialog laporan metadata detail berkas, resolusi, color space, dan metrik kualitas citra.
 * `raw_dialog.py`: Dialog konfigurasi parameter dimensi, channels, dan header offset saat mengimpor citra biner mentah (*RAW*).
+* `spatial_dialog.py`: Dialog konfigurasi Operasi Spasial Lokal (Linier Mean 2x2/3x3/5x5, Gaussian, Sharpening Laplacian, Roberts 2x2, Sobel 3x3, Custom Kernel 3x3, dan Non-Linier Median, Max, Min Filter) dengan live preview dan penjelasan formula edukatif.
+* `noise_dialog.py`: Dialog `AddNoiseDialog` untuk simulasi derau (Salt & Pepper, Gaussian, Speckle) dan `NoiseReductionDialog` untuk reduksi derau terarah lengkap dengan evaluasi restorasi ilmiah real-time (skor MSE dan PSNR).
 
 Pola arsitektur dialog dengan live preview (`BaseLivePreviewDialog`):
 * Semua dialog yang menghasilkan live preview mewarisi `BaseLivePreviewDialog`.

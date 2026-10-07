@@ -271,3 +271,54 @@ def histogram_specification(img: ImageMatrix, target_prob: np.ndarray) -> ImageM
     gray = img.to_grayscale_array()
     result = lut[gray]
     return ImageMatrix(result, color_mode="GRAYSCALE")
+
+
+# ==============================================================================
+# Image Quality Assessment Metrics (MSE & PSNR Manual)
+# ==============================================================================
+
+def compute_mse(img1: ImageMatrix, img2: ImageMatrix) -> float:
+    """
+    Menghitung Mean Squared Error (MSE) antara dua citra secara MANUAL.
+    
+    Rumus Matematis:
+        MSE = (1 / N) * Sum ( (I1(x, y) - I2(x, y))^2 )
+    
+    Nilai MSE = 0 menunjukkan kedua citra identik sempurna.
+    Semakin kecil nilai MSE, semakin mirip kedua citra.
+    """
+    arr1 = img1.array.astype(np.float64)
+    arr2 = img2.array.astype(np.float64)
+
+    # Sesuaikan dimensi jika berbeda bentuk
+    if arr1.shape != arr2.shape:
+        # Jika satu grayscale dan satu RGB, ubah keduanya ke grayscale
+        if arr1.ndim == 3 and arr2.ndim == 2:
+            arr1 = img1.to_grayscale_array().astype(np.float64)
+        elif arr1.ndim == 2 and arr2.ndim == 3:
+            arr2 = img2.to_grayscale_array().astype(np.float64)
+
+    # Hitung selisih kuadrat piksel per piksel
+    diff_sq = (arr1 - arr2) ** 2
+    # Rata-rata dari seluruh elemen (mean)
+    mse = float(np.mean(diff_sq))
+    return mse
+
+
+def compute_psnr(img1: ImageMatrix, img2: ImageMatrix, max_pixel_val: float = 255.0) -> float:
+    """
+    Menghitung Peak Signal-to-Noise Ratio (PSNR) dalam satuan desibel (dB) secara MANUAL.
+    
+    Rumus Matematis:
+        PSNR = 10 * log10( (MAX_I^2) / MSE ) = 20 * log10( MAX_I / sqrt(MSE) )
+        
+    Di mana MAX_I untuk citra 8-bit adalah 255.
+    Jika MSE = 0 (citra identik), PSNR bernilai tak hingga (infinity / float('inf')).
+    """
+    mse = compute_mse(img1, img2)
+    if mse == 0.0:
+        return float("inf")
+
+    psnr = 10.0 * np.log10((max_pixel_val ** 2) / mse)
+    return float(psnr)
+

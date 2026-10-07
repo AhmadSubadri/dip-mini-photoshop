@@ -28,6 +28,14 @@ from ..engine.geometry_ops import (
     rotate_orthogonal, flip_horizontal, flip_vertical
 )
 from ..engine.metrics import compute_statistics, histogram_equalization
+from ..engine.spatial_ops import (
+    apply_mean_filter, apply_gaussian_filter, apply_sharpen_filter,
+    apply_edge_roberts, apply_edge_sobel,
+    apply_median_filter, apply_max_filter, apply_min_filter,
+)
+from ..engine.noise_ops import (
+    add_salt_and_pepper_noise, add_gaussian_noise, add_speckle_noise,
+)
 from .canvas import ImageCanvas
 from .histogram_widget import HistogramWidget
 from .dialogs import (
@@ -37,6 +45,7 @@ from .dialogs import (
     LogTransformDialog, InverseLogTransformDialog,
     GrayLevelSlicingDialog, BitPlaneSlicingDialog,
     HistogramSpecificationDialog,
+    SpatialFilterDialog, AddNoiseDialog, NoiseReductionDialog,
 )
 from .styles import PHOTOSHOP_DARK_THEME
 
@@ -334,7 +343,65 @@ class MainWindow(QMainWindow):
         act_not.triggered.connect(lambda: self._apply_quick_point_op("Bitwise NOT", bitwise_not))
         op_menu.addAction(act_not)
 
-        # 7. TRANSFORM / GEOMETRY
+        # 7. FILTER MENU (Operasi Spasial Lokal / Ketetanggaan Piksel)
+        filter_menu = mb.addMenu("&Filter")
+
+        act_spatial_diag = QAction("&Operasi Spasial Lokal (Dialog Lengkap)...", self)
+        act_spatial_diag.setShortcut("Ctrl+F")
+        act_spatial_diag.triggered.connect(self.action_spatial_filter_dialog)
+        filter_menu.addAction(act_spatial_diag)
+
+        filter_menu.addSeparator()
+
+        # Operasi Linier
+        lin_menu = filter_menu.addMenu("Operasi &Linier (Konvolusi)")
+        act_q_mean = QAction("Mean / Averaging Blur (3x3)", self)
+        act_q_mean.triggered.connect(self.action_quick_mean)
+        lin_menu.addAction(act_q_mean)
+
+        act_q_gauss = QAction("Gaussian Blur (3x3, \u03c3=1.0)", self)
+        act_q_gauss.triggered.connect(self.action_quick_gaussian)
+        lin_menu.addAction(act_q_gauss)
+
+        act_q_sharp = QAction("Sharpening (Laplacian 3x3)", self)
+        act_q_sharp.triggered.connect(self.action_quick_sharpen)
+        lin_menu.addAction(act_q_sharp)
+
+        lin_menu.addSeparator()
+        act_q_rob = QAction("Deteksi Tepi Roberts (Kernel 2x2)", self)
+        act_q_rob.triggered.connect(self.action_quick_roberts)
+        lin_menu.addAction(act_q_rob)
+
+        act_q_sob = QAction("Deteksi Tepi Sobel (Kernel 3x3)", self)
+        act_q_sob.triggered.connect(self.action_quick_sobel)
+        lin_menu.addAction(act_q_sob)
+
+        # Operasi Non-Linier
+        nonlin_menu = filter_menu.addMenu("Operasi &Non-Linier (Rank-Order)")
+        act_q_med = QAction("Median Filter (3x3)", self)
+        act_q_med.triggered.connect(self.action_quick_median)
+        nonlin_menu.addAction(act_q_med)
+
+        act_q_max = QAction("Max Filter (3x3)", self)
+        act_q_max.triggered.connect(self.action_quick_max)
+        nonlin_menu.addAction(act_q_max)
+
+        act_q_min = QAction("Min Filter (3x3)", self)
+        act_q_min.triggered.connect(self.action_quick_min)
+        nonlin_menu.addAction(act_q_min)
+
+        # 8. NOISE & RESTORATION MENU
+        noise_menu = mb.addMenu("&Noise && Restorasi")
+
+        act_noise_add = QAction("Simulasi &Tambah Derau (Add Noise)...", self)
+        act_noise_add.triggered.connect(self.action_add_noise_dialog)
+        noise_menu.addAction(act_noise_add)
+
+        act_noise_reduce = QAction("&Reduksi Derau && Evaluasi Restorasi (PSNR/MSE)...", self)
+        act_noise_reduce.triggered.connect(self.action_noise_reduction_dialog)
+        noise_menu.addAction(act_noise_reduce)
+
+        # 9. TRANSFORM / GEOMETRY
         geom_menu = mb.addMenu("&Transform")
 
         act_rot_cw = QAction("Rotate 90° &Clockwise", self)
@@ -791,6 +858,56 @@ class MainWindow(QMainWindow):
             self.lbl_status_msg.setText("Applied Arithmetic/Boolean Operation")
         else:
             canvas.set_image(doc.current, doc.original)
+
+    # ==========================================================================
+    # Spatial Filtering & Noise Actions
+    # ==========================================================================
+
+    def action_spatial_filter_dialog(self):
+        self._run_preview_dialog(SpatialFilterDialog, "Operasi Spasial Lokal")
+
+    def action_add_noise_dialog(self):
+        self._run_preview_dialog(AddNoiseDialog, "Tambah Derau (Noise)")
+
+    def action_noise_reduction_dialog(self):
+        doc = self._get_active_doc()
+        canvas = self._get_active_canvas()
+        if doc is None or canvas is None:
+            return
+
+        dlg = NoiseReductionDialog(doc.current, reference_img=doc.original, parent=self)
+        dlg.previewUpdated.connect(lambda preview_img: canvas.set_image(preview_img, doc.original))
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            doc.push_state("Reduksi Derau & Restorasi", dlg.result_img)
+            self._update_panels_for_active_doc()
+            self.lbl_status_msg.setText("Applied: Reduksi Derau & Restorasi")
+        else:
+            canvas.set_image(doc.current, doc.original)
+
+    def action_quick_mean(self):
+        self._apply_quick_point_op("Mean Blur 3x3", lambda img: apply_mean_filter(img, kernel_size=3))
+
+    def action_quick_gaussian(self):
+        self._apply_quick_point_op("Gaussian Blur 3x3", lambda img: apply_gaussian_filter(img, kernel_size=3, sigma=1.0))
+
+    def action_quick_sharpen(self):
+        self._apply_quick_point_op("Sharpening Laplacian", lambda img: apply_sharpen_filter(img, mode="standard"))
+
+    def action_quick_median(self):
+        self._apply_quick_point_op("Median Filter 3x3", lambda img: apply_median_filter(img, kernel_size=3))
+
+    def action_quick_max(self):
+        self._apply_quick_point_op("Max Filter 3x3", lambda img: apply_max_filter(img, kernel_size=3))
+
+    def action_quick_min(self):
+        self._apply_quick_point_op("Min Filter 3x3", lambda img: apply_min_filter(img, kernel_size=3))
+
+    def action_quick_roberts(self):
+        self._apply_quick_point_op("Deteksi Tepi Roberts (2x2)", apply_edge_roberts)
+
+    def action_quick_sobel(self):
+        self._apply_quick_point_op("Deteksi Tepi Sobel (3x3)", apply_edge_sobel)
 
     # ==========================================================================
     # Help & About

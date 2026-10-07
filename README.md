@@ -7,7 +7,7 @@
 [![PyQt6](https://img.shields.io/badge/GUI-PyQt6-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://riverbankcomputing.com/software/pyqt/)
 [![NumPy](https://img.shields.io/badge/Matrix_Engine-NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white)](https://numpy.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/Tests-Passing%20(14%2F14)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-Passing%20(19%2F19)-brightgreen?style=for-the-badge&logo=pytest)](tests/)
 
 *Aplikasi desktop pengolahan citra digital modern dengan antarmuka gelap profesional (Adobe Photoshop-style UX), mendukung live preview, multi-tab document, split-screen before/after comparison, histogram real-time, serta parser/writer mandiri untuk format citra standar dan biner mentah (RAW).*
 
@@ -103,7 +103,36 @@
     - **From Image**: histogram grayscale dari citra referensi yang dipilih pengguna (citra referensi tidak masuk ke riwayat dokumen).
   - Output selalu `GRAYSCALE`. Tersedia di menu **Image → Histogram Specification...** dengan live preview dan tombol Apply/Cancel.
 
-### 7. 🖥️ Photoshop-Grade User Experience (UX)
+### 7. 🔍 Operasi Spasial Lokal (Neighborhood Operations - 100% Manual From Scratch)
+*Seluruh komputasi spasial ditulis mandiri tanpa library filter eksternal (OpenCV/SciPy/PIL-Filter).*
+- **Padding Manual (Boundary Handling)**: Penanganan batas citra (*Replicate Border*, *Zero Padding*, *Reflect*) untuk mempertahankan dimensi citra asli.
+- **Konvolusi Spasial 2D Manual**:
+  - Implementasi *sliding window* dengan formula $g(y,x) = \sum \sum f(y+i, x+j) \cdot K(i,j)$.
+- **Operasi Linier**:
+  - **Mean / Averaging Blur**: Kernel ukuran bebas ($2\times 2$, $3\times 3$, $5\times 5$, $7\times 7$) berbobot $\frac{1}{K^2}$.
+  - **Gaussian Blur**: Pembobotan matematis kurva normal Gauss $G(y,x) = \frac{1}{2\pi\sigma^2} e^{-\frac{x^2+y^2}{2\sigma^2}}$ dengan normalisasi $\sum K = 1$.
+  - **Sharpening (Laplacian)**: High-pass sharpening berbasis operator Laplacian 4-tetangga dan 8-tetangga.
+  - **Deteksi Tepi Roberts Cross ($2\times 2$)**: Gradien diferensial diagonal $G_x = \begin{bmatrix}1 & 0 \\ 0 & -1\end{bmatrix}, G_y = \begin{bmatrix}0 & 1 \\ -1 & 0\end{bmatrix}$, magnitudo $G = \sqrt{G_x^2 + G_y^2}$.
+  - **Deteksi Tepi Sobel ($3\times 3$)**: Pembobotan diferensial horizontal dan vertikal.
+  - **Custom Kernel Matrix**: Pengguna dapat mendefinisikan nilai matriks kernel $3\times 3$ secara bebas melalui grid editor.
+- **Operasi Non-Linier (Rank-Order / Order-Statistic Filters)**:
+  - **Median Filter**: Mengurutkan nilai piksel tetangga dalam jendela lokal dan mengambil nilai tengah $\lfloor N/2 \rfloor$. Menghilangkan *salt-and-pepper noise* tanpa mengaburkan tepi.
+  - **Max Filter**: Mengambil nilai intensitas tertinggi di jendela lokal (mempertegas area terang / mereduksi bintik hitam).
+  - **Min Filter**: Mengambil nilai intensitas terendah di jendela lokal (mempertegas area gelap / mereduksi bintik putih).
+
+### 8. ⚡ Simulasi Derau & Restorasi Citra (Noise & Restoration)
+- **Pembangkitan Derau Manual (Add Noise)**:
+  - **Salt & Pepper Noise**: Mengacak piksel menjadi nilai ekstrem $255$ (Salt) dan $0$ (Pepper) sesuai persentase kerapatan.
+  - **Additive Gaussian Noise**: Menambahkan derau berdistribusi Gauss acak $f_{\text{noisy}} = \text{clip}(f + N(0, \sigma^2), 0, 255)$.
+  - **Multiplicative Speckle Noise**: Derau proporsional terhadap intensitas piksel $f_{\text{noisy}} = \text{clip}(f + f \cdot N(0, \text{Var}), 0, 255)$.
+- **Reduksi Derau & Evaluasi Restorasi Ilmiah**:
+  - Pereduksian derau menggunakan operasi lokal terarah (Median Filter untuk Salt & Pepper, Mean/Gaussian untuk Gaussian noise).
+  - **Kalkulasi Kuantitatif Kualitas Citra Real-Time**:
+    - **MSE (Mean Squared Error)**: $\text{MSE} = \frac{1}{N} \sum (I_1 - I_2)^2$.
+    - **PSNR (Peak Signal-to-Noise Ratio)**: $\text{PSNR} = 10 \log_{10}\left(\frac{255^2}{\text{MSE}}\right) \text{ dB}$.
+    - Menampilkan skor Sebelum vs Sesudah reduksi serta delta $\Delta\text{PSNR}$ (+dB) secara transparan di antarmuka dialog.
+
+### 9. 🖥️ Photoshop-Grade User Experience (UX)
 - **Photoshop Dark UI**: Desain antarmuka gelap modern, elegan, dan ramah untuk penggunaan jangka panjang.
 - **Multi-Tab Document Workspace**: Kemampuan membuka dan menyunting banyak citra sekaligus.
 - **Interactive Canvas Engine**: Panning halus (klik-seret kursor) dan zooming berbasis titik kursor (*mouse wheel zoom*).
